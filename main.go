@@ -36,6 +36,7 @@ type Monitor struct {
 	LastCheck    string    `gorm:"default:never" json:"lastCheck"`
 	IsThirdParty bool      `gorm:"default:false" json:"isThirdParty,omitempty"`
 	Icon         string    `json:"icon,omitempty"`
+	CheckInterval int      `gorm:"default:60" json:"checkInterval"` // Interval in seconds
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
@@ -45,6 +46,7 @@ type CreateMonitorRequest struct {
 	URL          string `json:"url"`
 	IsThirdParty bool   `json:"isThirdParty,omitempty"`
 	Icon         string `json:"icon,omitempty"`
+	CheckInterval int   `json:"checkInterval,omitempty"` // Interval in seconds (default: 60)
 }
 
 type StatsResponse struct {
@@ -129,6 +131,7 @@ func seedData() {
 			Status:       "up",
 			ResponseTime: 89,
 			LastCheck:    "5s ago",
+			CheckInterval: 60,
 		},
 		{
 			Name:         "Google",
@@ -138,6 +141,7 @@ func seedData() {
 			ResponseTime: 67,
 			LastCheck:    "1s ago",
 			IsThirdParty: true,
+			CheckInterval: 60,
 		},
 	}
 
@@ -305,11 +309,32 @@ func startChecker() {
 	// Check immediately on startup
 	checkAllServices()
 
-	// Then check every 60 seconds
-	ticker := time.NewTicker(60 * time.Second)
+	// Start individual checkers for each monitor based on their intervals
 	go func() {
-		for range ticker.C {
-			checkAllServices()
+		for {
+			var monitors []Monitor
+			db.Find(&monitors)
+
+			for i := range monitors {
+				monitor := &monitors[i]
+				interval := monitor.CheckInterval
+				if interval <= 0 {
+					interval = 60 // Default to 60 seconds
+				}
+
+				// Check if it's time to check this monitor
+				timeSinceLastCheck := time.Since(monitor.UpdatedAt)
+				intervalDuration := time.Duration(interval) * time.Second
+
+				if timeSinceLastCheck >= intervalDuration {
+					go checkService(monitor)
+					// Small delay between concurrent checks
+					time.Sleep(100 * time.Millisecond)
+				}
+			}
+
+			// Check every 10 seconds to see if any monitor needs checking
+			time.Sleep(10 * time.Second)
 		}
 	}()
 }
@@ -345,44 +370,64 @@ func getResponseTimeData(monitorID string) []ResponseTimeData {
 }
 
 func apiMonitors(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[API] %s %s", r.Method, r.URL.Path)
+	
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	if r.Method == http.MethodGet {
 		var monitors []Monitor
-		db.Find(&monitors)
+		if err := db.Find(&monitors).Error; err != nil {
+			log.Printf("[API] ERROR GET /api/monitors: %v", err)
+			http.Error(w, "Failed to fetch monitors", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("[API] GET /api/monitors: returned %d monitors", len(monitors))
 		json.NewEncoder(w).Encode(monitors)
 		return
 	}
 
+	log.Printf("[API] ERROR %s /api/monitors: Method not allowed", r.Method)
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 }
 
 func apiCreateMonitor(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[API] %s %s", r.Method, r.URL.Path)
+	
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
 	if r.Method == http.MethodOptions {
+		log.Printf("[API] OPTIONS /api/monitors/create: CORS preflight")
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
 	if r.Method != http.MethodPost {
+		log.Printf("[API] ERROR %s /api/monitors/create: Method not allowed", r.Method)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var req CreateMonitorRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("[API] ERROR POST /api/monitors/create: Invalid request body: %v", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.Name == "" || req.URL == "" {
+		log.Printf("[API] ERROR POST /api/monitors/create: Missing required fields (name=%q, url=%q)", req.Name, req.URL)
 		http.Error(w, "Name and URL are required", http.StatusBadRequest)
 		return
+	}
+
+	// Set default check interval to 60 seconds if not provided
+	checkInterval := req.CheckInterval
+	if checkInterval <= 0 {
+		checkInterval = 60
 	}
 
 	monitor := Monitor{
@@ -394,12 +439,16 @@ func apiCreateMonitor(w http.ResponseWriter, r *http.Request) {
 		Uptime:       0,
 		ResponseTime: 0,
 		LastCheck:    "never",
+		CheckInterval: checkInterval,
 	}
 
 	if err := db.Create(&monitor).Error; err != nil {
+		log.Printf("[API] ERROR POST /api/monitors/create: Failed to create monitor: %v", err)
 		http.Error(w, "Failed to create monitor", http.StatusInternalServerError)
 		return
 	}
+
+	log.Printf("[API] POST /api/monitors/create: Created monitor ID=%d, name=%q, url=%q, checkInterval=%ds", monitor.ID, monitor.Name, monitor.URL, monitor.CheckInterval)
 
 	// Immediately check the new monitor
 	go checkService(&monitor)
@@ -409,50 +458,62 @@ func apiCreateMonitor(w http.ResponseWriter, r *http.Request) {
 }
 
 func apiStats(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[API] %s %s", r.Method, r.URL.Path)
+	
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	if r.Method != http.MethodGet {
+		log.Printf("[API] ERROR %s /api/stats: Method not allowed", r.Method)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	stats := getStats()
+	log.Printf("[API] GET /api/stats: uptime=%.2f%%, up=%d, down=%d, avgResponseTime=%dms", 
+		stats.OverallUptime, stats.ServicesUp, stats.ServicesDown, stats.AvgResponseTime)
 	json.NewEncoder(w).Encode(stats)
 }
 
 func apiResponseTime(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	monitorID := r.URL.Query().Get("id")
 	if monitorID == "" {
 		monitorID = "1"
 	}
+	log.Printf("[API] %s %s?id=%s", r.Method, r.URL.Path, monitorID)
+	
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	if r.Method != http.MethodGet {
+		log.Printf("[API] ERROR %s /api/response-time: Method not allowed", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
 	data := getResponseTimeData(monitorID)
+	log.Printf("[API] GET /api/response-time?id=%s: returned %d data points", monitorID, len(data))
 	json.NewEncoder(w).Encode(data)
 }
 
 func apiMonitor(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	log.Printf("[API] %s %s?id=%s", r.Method, r.URL.Path, id)
+	
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
 	if r.Method == http.MethodOptions {
+		log.Printf("[API] OPTIONS /api/monitor: CORS preflight")
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
 	if r.Method == http.MethodGet {
 		w.Header().Set("Content-Type", "application/json")
-		id := r.URL.Query().Get("id")
 		if id == "" {
+			log.Printf("[API] ERROR GET /api/monitor: Missing id parameter")
 			http.Error(w, "Missing id parameter", http.StatusBadRequest)
 			return
 		}
@@ -460,28 +521,32 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 		var monitor Monitor
 		monitorID, err := strconv.ParseUint(id, 10, 32)
 		if err != nil {
+			log.Printf("[API] ERROR GET /api/monitor?id=%s: Invalid id parameter: %v", id, err)
 			http.Error(w, "Invalid id parameter", http.StatusBadRequest)
 			return
 		}
 
 		if err := db.First(&monitor, monitorID).Error; err != nil {
+			log.Printf("[API] ERROR GET /api/monitor?id=%s: Monitor not found", id)
 			http.Error(w, "Monitor not found", http.StatusNotFound)
 			return
 		}
 
+		log.Printf("[API] GET /api/monitor?id=%s: returned monitor name=%q", id, monitor.Name)
 		json.NewEncoder(w).Encode(monitor)
 		return
 	}
 
 	if r.Method == http.MethodDelete {
-		id := r.URL.Query().Get("id")
 		if id == "" {
+			log.Printf("[API] ERROR DELETE /api/monitor: Missing id parameter")
 			http.Error(w, "Missing id parameter", http.StatusBadRequest)
 			return
 		}
 
 		monitorID, err := strconv.ParseUint(id, 10, 32)
 		if err != nil {
+			log.Printf("[API] ERROR DELETE /api/monitor?id=%s: Invalid id parameter: %v", id, err)
 			http.Error(w, "Invalid id parameter", http.StatusBadRequest)
 			return
 		}
@@ -489,19 +554,23 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 		// Check if monitor exists first
 		var monitor Monitor
 		if err := db.First(&monitor, monitorID).Error; err != nil {
+			log.Printf("[API] ERROR DELETE /api/monitor?id=%s: Monitor not found", id)
 			http.Error(w, "Monitor not found", http.StatusNotFound)
 			return
 		}
 
 		if err := db.Delete(&Monitor{}, monitorID).Error; err != nil {
+			log.Printf("[API] ERROR DELETE /api/monitor?id=%s: Failed to delete: %v", id, err)
 			http.Error(w, "Failed to delete monitor", http.StatusInternalServerError)
 			return
 		}
 
+		log.Printf("[API] DELETE /api/monitor?id=%s: Successfully deleted monitor name=%q", id, monitor.Name)
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
+	log.Printf("[API] ERROR %s /api/monitor: Method not allowed", r.Method)
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 }
 

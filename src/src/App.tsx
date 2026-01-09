@@ -40,6 +40,7 @@ interface Monitor {
   lastCheck: string;
   isThirdParty?: boolean;
   icon?: string;
+  checkInterval?: number;
 }
 
 interface Stats {
@@ -68,6 +69,7 @@ export function App() {
     url: "",
     isThirdParty: false,
     icon: "",
+    checkInterval: 60,
   });
 
   const fetchMonitors = useCallback(async () => {
@@ -137,7 +139,7 @@ export function App() {
       }
 
       // Reset form and close dialog
-      setNewService({ name: "", url: "", isThirdParty: false, icon: "" });
+      setNewService({ name: "", url: "", isThirdParty: false, icon: "", checkInterval: 60 });
       setDialogOpen(false);
 
       // Refresh monitors list
@@ -587,6 +589,21 @@ export function App() {
                 value={newService.icon}
                 onChange={(e) => setNewService({ ...newService, icon: e.target.value })}
               />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="checkInterval">Check Interval (seconds)</Label>
+              <Input
+                id="checkInterval"
+                type="number"
+                min="10"
+                max="3600"
+                placeholder="60"
+                value={newService.checkInterval}
+                onChange={(e) => setNewService({ ...newService, checkInterval: parseInt(e.target.value) || 60 })}
+              />
+              <p className="text-xs text-muted-foreground">
+                How often to check this service (10-3600 seconds, default: 60)
+              </p>
             </div>
             <div className="flex items-center space-x-2">
               <input
