@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,37 +33,114 @@ interface Monitor {
   icon?: string;
 }
 
-const mockMonitors: Monitor[] = [
-  { id: "1", name: "Check Port", url: "https://checkport.example.com", uptime: 100, status: "up", responseTime: 145, lastCheck: "2s ago" },
-  { id: "2", name: "Example.com", url: "https://example.com", uptime: 100, status: "up", responseTime: 89, lastCheck: "5s ago" },
-  { id: "4", name: "Google", url: "https://google.com", uptime: 100, status: "up", responseTime: 67, lastCheck: "1s ago", isThirdParty: true },
-  { id: "5", name: "MySQL", url: "mysql://localhost:3306", uptime: 100, status: "up", responseTime: 12, lastCheck: "3s ago" },
-  { id: "6", name: "Ping", url: "ping://8.8.8.8", uptime: 100, status: "up", responseTime: 23, lastCheck: "1s ago" },
-];
+interface Stats {
+  overallUptime: number;
+  servicesUp: number;
+  servicesDown: number;
+  avgResponseTime: number;
+}
 
-// Mock response time data
-const mockResponseData = Array.from({ length: 50 }, (_, i) => ({
-  time: new Date(Date.now() - (50 - i) * 60000).toLocaleTimeString("en-US", { 
-    hour: "2-digit", 
-    minute: "2-digit" 
-  }),
-  responseTime: Math.random() * 200 + 50 + (i === 30 ? 1000 : 0),
-}));
+interface ResponseTimeData {
+  time: string;
+  responseTime: number;
+}
 
 export function App() {
+  const [monitors, setMonitors] = useState<Monitor[]>([]);
+  const [stats, setStats] = useState<Stats | null>(null);
   const [selectedMonitor, setSelectedMonitor] = useState<Monitor | null>(null);
+  const [responseTimeData, setResponseTimeData] = useState<ResponseTimeData[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
-  const filteredMonitors = mockMonitors.filter(monitor =>
+  const fetchMonitors = useCallback(async () => {
+    try {
+      const response = await fetch("/api/monitors?t=" + Date.now()); // Add cache busting
+      const data = await response.json();
+      setMonitors(data);
+      
+      // Update selected monitor if it exists, or select first monitor if none selected
+      if (data.length > 0) {
+        setSelectedMonitor((prev) => {
+          if (prev) {
+            // Find and update the selected monitor with latest data
+            const updatedMonitor = data.find((m: Monitor) => m.id === prev.id);
+            if (updatedMonitor) {
+              return updatedMonitor;
+            }
+          }
+          // Selected monitor no longer exists or no previous selection, select first one
+          return data[0];
+        });
+      }
+      setLoading(false);
+      setLastUpdate(new Date());
+    } catch (error) {
+      console.error("Failed to fetch monitors:", error);
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchStats = useCallback(async () => {
+    try {
+      const response = await fetch("/api/stats?t=" + Date.now()); // Add cache busting
+      const data = await response.json();
+      setStats(data);
+      setLastUpdate(new Date());
+    } catch (error) {
+      console.error("Failed to fetch stats:", error);
+    }
+  }, []);
+
+  const fetchResponseTimeData = useCallback(async (monitorId: string) => {
+    try {
+      const response = await fetch(`/api/response-time?id=${monitorId}&t=${Date.now()}`); // Add cache busting
+      const data = await response.json();
+      setResponseTimeData(data);
+      setLastUpdate(new Date());
+    } catch (error) {
+      console.error("Failed to fetch response time data:", error);
+    }
+  }, []);
+
+  // Initial data fetch
+  useEffect(() => {
+    fetchMonitors();
+    fetchStats();
+  }, [fetchMonitors, fetchStats]);
+
+  // Poll monitors and stats every 5 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchMonitors();
+      fetchStats();
+    }, 5000); // Poll every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [fetchMonitors, fetchStats]);
+
+  // Fetch response time data when monitor is selected
+  useEffect(() => {
+    if (selectedMonitor) {
+      fetchResponseTimeData(selectedMonitor.id);
+    }
+  }, [selectedMonitor, fetchResponseTimeData]);
+
+  // Poll response time data every 10 seconds when monitor is selected
+  useEffect(() => {
+    if (!selectedMonitor) return;
+
+    const interval = setInterval(() => {
+      fetchResponseTimeData(selectedMonitor.id);
+    }, 10000); // Poll every 10 seconds
+
+    return () => clearInterval(interval);
+  }, [selectedMonitor, fetchResponseTimeData]);
+
+  const filteredMonitors = monitors.filter(monitor =>
     monitor.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
-
-  const upCount = mockMonitors.filter(m => m.status === "up").length;
-  const downCount = mockMonitors.filter(m => m.status === "down").length;
-  const avgResponseTime = Math.round(
-    mockMonitors.filter(m => m.status === "up").reduce((sum, m) => sum + m.responseTime, 0) / upCount
-  );
-  const overallUptime = Math.round((upCount / mockMonitors.length) * 100);
 
   const getStatusColor = (status: string) => {
     return status === "up" ? "text-green-500" : "text-red-500";
@@ -84,7 +161,14 @@ export function App() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-foreground">NanoStatus</h1>
-              <p className="text-xs text-muted-foreground">Real-time monitoring dashboard</p>
+              <p className="text-xs text-muted-foreground">
+                Real-time monitoring dashboard
+                {lastUpdate && (
+                  <span className="ml-2">
+                    • Updated {lastUpdate.toLocaleTimeString()}
+                  </span>
+                )}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -107,60 +191,68 @@ export function App() {
 
       <div className="container mx-auto px-6 py-6">
         {/* Summary Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <Card className="border-2">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">Overall Status</p>
-                  <p className="text-3xl font-bold text-foreground">{overallUptime}%</p>
-                </div>
-                <div className="p-3 rounded-full bg-primary/10">
-                  <Activity className="h-6 w-6 text-primary" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-2">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">Services Up</p>
-                  <p className="text-3xl font-bold text-green-500">{upCount}</p>
-                </div>
-                <div className="p-3 rounded-full bg-green-500/10">
-                  <CheckCircle2 className="h-6 w-6 text-green-500" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-2">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">Services Down</p>
-                  <p className="text-3xl font-bold text-red-500">{downCount}</p>
-                </div>
-                <div className="p-3 rounded-full bg-red-500/10">
-                  <XCircle className="h-6 w-6 text-red-500" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-2">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">Avg Response</p>
-                  <p className="text-3xl font-bold text-foreground">{avgResponseTime}ms</p>
-                </div>
-                <div className="p-3 rounded-full bg-blue-500/10">
-                  <TrendingUp className="h-6 w-6 text-blue-500" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+        {loading ? (
+          <div className="text-center py-12">
+            <p className="text-muted-foreground">Loading...</p>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+              <Card className="border-2">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">Overall Status</p>
+                      <p className="text-3xl font-bold text-foreground">
+                        {stats ? Math.round(stats.overallUptime) : 0}%
+                      </p>
+                    </div>
+                    <div className="p-3 rounded-full bg-primary/10">
+                      <Activity className="h-6 w-6 text-primary" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-2">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">Services Up</p>
+                      <p className="text-3xl font-bold text-green-500">{stats?.servicesUp || 0}</p>
+                    </div>
+                    <div className="p-3 rounded-full bg-green-500/10">
+                      <CheckCircle2 className="h-6 w-6 text-green-500" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-2">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">Services Down</p>
+                      <p className="text-3xl font-bold text-red-500">{stats?.servicesDown || 0}</p>
+                    </div>
+                    <div className="p-3 rounded-full bg-red-500/10">
+                      <XCircle className="h-6 w-6 text-red-500" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-2">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">Avg Response</p>
+                      <p className="text-3xl font-bold text-foreground">{stats?.avgResponseTime || 0}ms</p>
+                    </div>
+                    <div className="p-3 rounded-full bg-blue-500/10">
+                      <TrendingUp className="h-6 w-6 text-blue-500" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
 
         {/* Services Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
@@ -232,8 +324,8 @@ export function App() {
           ))}
         </div>
 
-        {/* Selected Service Details */}
-        {selectedMonitor && (
+            {/* Selected Service Details */}
+            {selectedMonitor && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
@@ -329,7 +421,7 @@ export function App() {
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={mockResponseData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                  <LineChart data={responseTimeData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
                     <XAxis 
                       dataKey="time" 
@@ -371,7 +463,9 @@ export function App() {
                 </ResponsiveContainer>
               </CardContent>
             </Card>
-          </div>
+            </div>
+            )}
+          </>
         )}
       </div>
     </div>
