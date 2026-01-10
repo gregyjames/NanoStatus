@@ -15,6 +15,7 @@ type Monitor struct {
 	Icon         string    `json:"icon,omitempty"`
 	CheckInterval int      `gorm:"default:60" json:"checkInterval"` // Interval in seconds
 	Paused       bool      `gorm:"default:false" json:"paused"` // Whether monitoring is paused
+	ConfigHash   string    `gorm:"index" json:"configHash,omitempty"` // Hash of YAML config (empty if created via UI/API)
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
