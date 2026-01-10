@@ -549,29 +549,75 @@ func startChecker() {
 	}()
 }
 
-func getResponseTimeData(monitorID string) []ResponseTimeData {
+func getResponseTimeData(monitorID string, timeRange string) []ResponseTimeData {
 	id, err := strconv.ParseUint(monitorID, 10, 32)
 	if err != nil {
 		return []ResponseTimeData{}
 	}
 
-	// Get last 50 checks from database, ordered by creation time
+	// Calculate time cutoff based on range
+	var cutoffTime time.Time
+	now := time.Now()
+	
+	switch timeRange {
+	case "1h":
+		cutoffTime = now.Add(-1 * time.Hour)
+	case "12h":
+		cutoffTime = now.Add(-12 * time.Hour)
+	case "1w":
+		cutoffTime = now.Add(-7 * 24 * time.Hour)
+	case "1y":
+		cutoffTime = now.Add(-365 * 24 * time.Hour)
+	default:
+		// Default to 24 hours
+		cutoffTime = now.Add(-24 * time.Hour)
+	}
+
+	// Get checks within time range, ordered by creation time
 	var checks []CheckHistory
-	db.Where("monitor_id = ?", id).
-		Order("created_at ASC").
-		Limit(50).
-		Find(&checks)
+	query := db.Where("monitor_id = ? AND created_at > ?", id, cutoffTime).
+		Order("created_at ASC")
+	
+	// Limit results based on time range to avoid too much data
+	switch timeRange {
+	case "1h":
+		query = query.Limit(60) // Max 60 points for 1 hour
+	case "12h":
+		query = query.Limit(144) // Max 144 points for 12 hours
+	case "24h":
+		query = query.Limit(288) // Max 288 points for 24 hours
+	case "1w":
+		query = query.Limit(168) // Max 168 points for 1 week
+	case "1y":
+		query = query.Limit(365) // Max 365 points for 1 year
+	default:
+		query = query.Limit(50)
+	}
+	
+	query.Find(&checks)
 
 	// If no data, return empty array
 	if len(checks) == 0 {
 		return []ResponseTimeData{}
 	}
 
-	// Convert to response time data format
+	// Convert to response time data format with appropriate time formatting
 	data := make([]ResponseTimeData, len(checks))
 	for i, check := range checks {
+		var timeStr string
+		switch timeRange {
+		case "1h", "12h", "24h":
+			timeStr = check.CreatedAt.Format("03:04 PM")
+		case "1w":
+			timeStr = check.CreatedAt.Format("Mon 03:04 PM")
+		case "1y":
+			timeStr = check.CreatedAt.Format("Jan 2")
+		default:
+			timeStr = check.CreatedAt.Format("03:04 PM")
+		}
+		
 		data[i] = ResponseTimeData{
-			Time:         check.CreatedAt.Format("03:04 PM"),
+			Time:         timeStr,
 			ResponseTime: float64(check.ResponseTime),
 		}
 	}
@@ -687,10 +733,14 @@ func apiStats(w http.ResponseWriter, r *http.Request) {
 
 func apiResponseTime(w http.ResponseWriter, r *http.Request) {
 	monitorID := r.URL.Query().Get("id")
+	timeRange := r.URL.Query().Get("range")
 	if monitorID == "" {
 		monitorID = "1"
 	}
-	log.Printf("[API] %s %s?id=%s", r.Method, r.URL.Path, monitorID)
+	if timeRange == "" {
+		timeRange = "24h" // Default to 24 hours
+	}
+	log.Printf("[API] %s %s?id=%s&range=%s", r.Method, r.URL.Path, monitorID, timeRange)
 	
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -701,8 +751,8 @@ func apiResponseTime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := getResponseTimeData(monitorID)
-	log.Printf("[API] GET /api/response-time?id=%s: returned %d data points", monitorID, len(data))
+	data := getResponseTimeData(monitorID, timeRange)
+	log.Printf("[API] GET /api/response-time?id=%s&range=%s: returned %d data points", monitorID, timeRange, len(data))
 	json.NewEncoder(w).Encode(data)
 }
 

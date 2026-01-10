@@ -71,9 +71,9 @@ export function App() {
     }
   }, []);
 
-  const fetchResponseTimeData = useCallback(async (monitorId: string) => {
+  const fetchResponseTimeData = useCallback(async (monitorId: string, timeRange: string = "24h") => {
     try {
-      const response = await fetch(`/api/response-time?id=${monitorId}&t=${Date.now()}`);
+      const response = await fetch(`/api/response-time?id=${monitorId}&range=${timeRange}&t=${Date.now()}`);
       const data = await response.json();
       setResponseTimeData(data);
       setLastUpdate(new Date());
@@ -288,7 +288,7 @@ export function App() {
   useEffect(() => {
     if (selectedMonitor) {
       // Initial fetch only - updates will come via SSE when implemented
-      fetchResponseTimeData(String(selectedMonitor.id));
+      fetchResponseTimeData(String(selectedMonitor.id), "12h");
     }
   }, [selectedMonitor, fetchResponseTimeData]);
 
@@ -339,6 +339,7 @@ export function App() {
                     onDelete={deleteService}
                     onEdit={handleEdit}
                     onTogglePause={togglePause}
+                    onFetchResponseTime={fetchResponseTimeData}
                   />
                 </>
               ) : (
@@ -369,6 +370,7 @@ export function App() {
                     onDelete={deleteService}
                     onEdit={handleEdit}
                     onTogglePause={togglePause}
+                    onFetchResponseTime={fetchResponseTimeData}
                   />
                 ) : (
                   <div className="rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl border border-slate-700/50 p-12 shadow-2xl shadow-black/30 flex items-center justify-center min-h-[400px]">

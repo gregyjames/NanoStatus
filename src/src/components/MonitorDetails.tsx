@@ -12,14 +12,18 @@ interface MonitorDetailsProps {
   onDelete: (id: string | number) => void;
   onEdit: (monitor: Monitor) => void;
   onTogglePause: (id: string | number, paused: boolean) => void;
+  onFetchResponseTime?: (monitorId: string, timeRange: string) => void;
 }
 
-export function MonitorDetails({ monitor, responseTimeData, onDelete, onEdit, onTogglePause }: MonitorDetailsProps) {
+export function MonitorDetails({ monitor, responseTimeData, onDelete, onEdit, onTogglePause, onFetchResponseTime }: MonitorDetailsProps) {
   const avgResponseTime = responseTimeData.length > 0
     ? Math.round(responseTimeData.reduce((sum, data) => sum + data.responseTime, 0) / responseTimeData.length)
     : 0;
 
   const isPaused = monitor.paused || false;
+  
+  // Time range state (default to 24h, but show as "12h" initially for better UX)
+  const [timeRange, setTimeRange] = useState<string>("12h");
   
   // Calculate seconds since last update
   const [secondsSinceUpdate, setSecondsSinceUpdate] = useState<number>(0);
@@ -223,9 +227,33 @@ export function MonitorDetails({ monitor, responseTimeData, onDelete, onEdit, on
           </div>
 
           <div className="rounded-xl bg-slate-800/30 border border-slate-700/50 p-6">
-            <div className="flex items-center gap-3 mb-6">
-              <BarChart3 className="h-5 w-5 text-blue-400" />
-              <h3 className="text-lg font-bold text-white">Response Time History</h3>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <BarChart3 className="h-5 w-5 text-blue-400" />
+                <h3 className="text-lg font-bold text-white">Response Time History</h3>
+              </div>
+              <div className="flex items-center gap-2">
+                {(["1h", "12h", "1w", "1y"] as const).map((range) => (
+                  <Button
+                    key={range}
+                    variant={timeRange === range ? "default" : "outline"}
+                    size="sm"
+                    className={`text-xs px-3 h-7 transition-all ${
+                      timeRange === range
+                        ? "bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white shadow-lg shadow-blue-500/25"
+                        : "border-slate-700/50 bg-slate-800/30 text-white hover:bg-slate-700/50 hover:border-slate-600/50"
+                    }`}
+                    onClick={() => {
+                      setTimeRange(range);
+                      if (onFetchResponseTime) {
+                        onFetchResponseTime(String(monitor.id), range);
+                      }
+                    }}
+                  >
+                    {range === "1h" ? "1 Hour" : range === "12h" ? "12 Hours" : range === "1w" ? "1 Week" : "1 Year"}
+                  </Button>
+                ))}
+              </div>
             </div>
             <ResponsiveContainer width="100%" height={300}>
               <AreaChart data={responseTimeData}>
