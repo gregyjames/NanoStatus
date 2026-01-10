@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,9 +26,12 @@ import {
   Clock,
   AlertCircle,
   Zap,
-  Server
+  Server,
+  BarChart3,
+  Gauge,
+  Globe
 } from "lucide-react";
-import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from "recharts";
+import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, Area, AreaChart } from "recharts";
 import "./index.css";
 
 interface Monitor {
@@ -74,21 +78,18 @@ export function App() {
 
   const fetchMonitors = useCallback(async () => {
     try {
-      const response = await fetch("/api/monitors?t=" + Date.now()); // Add cache busting
+      const response = await fetch("/api/monitors?t=" + Date.now());
       const data = await response.json();
       setMonitors(data);
       
-      // Update selected monitor if it exists, or select first monitor if none selected
       if (data.length > 0) {
         setSelectedMonitor((prev) => {
           if (prev) {
-            // Find and update the selected monitor with latest data
             const updatedMonitor = data.find((m: Monitor) => String(m.id) === String(prev.id));
             if (updatedMonitor) {
               return updatedMonitor;
             }
           }
-          // Selected monitor no longer exists or no previous selection, select first one
           return data[0];
         });
       }
@@ -102,9 +103,8 @@ export function App() {
 
   const fetchStats = useCallback(async () => {
     try {
-      const response = await fetch("/api/stats?t=" + Date.now()); // Add cache busting
+      const response = await fetch("/api/stats?t=" + Date.now());
       const data = await response.json();
-      console.log("Stats updated:", data);
       setStats(data);
       setLastUpdate(new Date());
     } catch (error) {
@@ -114,7 +114,7 @@ export function App() {
 
   const fetchResponseTimeData = useCallback(async (monitorId: string) => {
     try {
-      const response = await fetch(`/api/response-time?id=${monitorId}&t=${Date.now()}`); // Add cache busting
+      const response = await fetch(`/api/response-time?id=${monitorId}&t=${Date.now()}`);
       const data = await response.json();
       setResponseTimeData(data);
       setLastUpdate(new Date());
@@ -139,11 +139,8 @@ export function App() {
         return;
       }
 
-      // Reset form and close dialog
       setNewService({ name: "", url: "", isThirdParty: false, icon: "", checkInterval: 60 });
       setDialogOpen(false);
-
-      // Refresh monitors list
       fetchMonitors();
       fetchStats();
     } catch (error) {
@@ -168,12 +165,10 @@ export function App() {
         return;
       }
 
-      // Clear selected monitor if it was deleted
       if (selectedMonitor && String(selectedMonitor.id) === String(monitorId)) {
         setSelectedMonitor(null);
       }
 
-      // Refresh monitors list
       fetchMonitors();
       fetchStats();
     } catch (error) {
@@ -182,36 +177,32 @@ export function App() {
     }
   };
 
-  // Initial data fetch
   useEffect(() => {
     fetchMonitors();
     fetchStats();
   }, [fetchMonitors, fetchStats]);
 
-  // Poll monitors and stats every 5 seconds
   useEffect(() => {
     const interval = setInterval(() => {
       fetchMonitors();
       fetchStats();
-    }, 5000); // Poll every 5 seconds
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [fetchMonitors, fetchStats]);
 
-  // Fetch response time data when monitor is selected
   useEffect(() => {
     if (selectedMonitor) {
       fetchResponseTimeData(String(selectedMonitor.id));
     }
   }, [selectedMonitor, fetchResponseTimeData]);
 
-  // Poll response time data every 10 seconds when monitor is selected
   useEffect(() => {
     if (!selectedMonitor) return;
 
     const interval = setInterval(() => {
       fetchResponseTimeData(String(selectedMonitor.id));
-    }, 10000); // Poll every 10 seconds
+    }, 10000);
 
     return () => clearInterval(interval);
   }, [selectedMonitor, fetchResponseTimeData]);
@@ -221,428 +212,446 @@ export function App() {
   );
 
   const getStatusColor = (status: string) => {
-    return status === "up" ? "text-green-500" : "text-red-500";
+    return status === "up" ? "text-emerald-400" : "text-rose-400";
   };
 
-  const getStatusBgColor = (status: string) => {
-    return status === "up" ? "bg-green-500/10 border-green-500/20" : "bg-red-500/10 border-red-500/20";
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1
+      }
+    }
+  };
+
+  const itemVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: { 
+      opacity: 1, 
+      y: 0,
+      transition: {
+        duration: 0.5,
+        ease: [0.4, 0, 0.2, 1] as const
+      }
+    }
   };
 
   return (
-    <div className="dark min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-primary/10">
-              <Zap className="h-5 w-5 text-primary" />
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
+      {/* Modern Header */}
+      <motion.header 
+        initial={{ y: -100, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+        className="sticky top-0 z-50 backdrop-blur-xl bg-slate-900/80 border-b border-slate-800/50 shadow-2xl"
+      >
+        <div className="container mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <motion.div
+                whileHover={{ scale: 1.1, rotate: 5 }}
+                whileTap={{ scale: 0.95 }}
+                className="p-3 rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-blue-500/30 shadow-lg shadow-blue-500/10"
+              >
+                <Activity className="h-6 w-6 text-blue-400" />
+              </motion.div>
+              <div>
+                <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
+                  NanoStatus
+                </h1>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {lastUpdate.toLocaleTimeString()}
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">NanoStatus</h1>
-              <p className="text-xs text-muted-foreground">
-                Real-time monitoring dashboard
-                {lastUpdate && (
-                  <span className="ml-2">
-                    • Updated {lastUpdate.toLocaleTimeString()}
-                  </span>
-                )}
-              </p>
+            <div className="flex items-center gap-3">
+              <div className="relative group">
+                <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400 group-focus-within:text-blue-400 transition-colors" />
+                <Input
+                  placeholder="Search services..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-11 pr-4 w-72 h-11 bg-slate-800/50 border-slate-700/50 focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/20 text-white placeholder:text-slate-500 rounded-xl"
+                />
+              </div>
+              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                <Button 
+                  className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white shadow-lg shadow-blue-500/25 h-11 px-6 rounded-xl font-semibold"
+                  onClick={() => setDialogOpen(true)}
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Service
+                </Button>
+              </motion.div>
             </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search services..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 w-64"
-              />
-            </div>
-            <Button 
-              className="bg-primary hover:bg-primary/90"
-              onClick={() => setDialogOpen(true)}
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Service
-            </Button>
           </div>
         </div>
-      </header>
+      </motion.header>
 
-      <div className="container mx-auto px-8 py-8">
-        {/* Summary Stats */}
+      <div className="container mx-auto px-6 py-8">
         {loading ? (
-          <div className="text-center py-20">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-primary border-t-transparent"></div>
-            <p className="text-muted-foreground mt-4">Loading...</p>
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+              className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full"
+            />
           </div>
         ) : (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8 animate-fade-in">
-              <Card className="border border-border/50 bg-card/50 backdrop-blur-sm shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-[1.02] group overflow-hidden relative">
-                <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                <CardContent className="pt-6 relative z-10">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wider">Overall Status</p>
-                      <p className="text-4xl font-bold bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent">
-                        {stats ? Math.round(stats.overallUptime) : 0}%
-                      </p>
+          <motion.div
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
+            className="space-y-8"
+          >
+            {/* Stats Grid - Modern Design */}
+            <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <motion.div
+                whileHover={{ scale: 1.02, y: -4 }}
+                className="relative group overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl border border-slate-700/50 p-6 shadow-xl shadow-black/20"
+              >
+                <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="relative z-10">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 rounded-xl bg-blue-500/20 border border-blue-500/30">
+                      <Activity className="h-5 w-5 text-blue-400" />
                     </div>
-                    <div className="p-3.5 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 border border-primary/20 group-hover:scale-110 transition-transform">
-                      <Activity className="h-6 w-6 text-primary" />
-                    </div>
+                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Uptime</span>
                   </div>
-                </CardContent>
-              </Card>
-              <Card className="border border-border/50 bg-card/50 backdrop-blur-sm shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-[1.02] group overflow-hidden relative">
-                <div className="absolute inset-0 bg-gradient-to-br from-green-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                <CardContent className="pt-6 relative z-10">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wider">Services Up</p>
-                      <p className="text-4xl font-bold text-green-500">{stats?.servicesUp || 0}</p>
-                    </div>
-                    <div className="p-3.5 rounded-2xl bg-gradient-to-br from-green-500/20 to-green-500/10 border border-green-500/20 group-hover:scale-110 transition-transform">
-                      <CheckCircle2 className="h-6 w-6 text-green-500" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="border border-border/50 bg-card/50 backdrop-blur-sm shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-[1.02] group overflow-hidden relative">
-                <div className="absolute inset-0 bg-gradient-to-br from-red-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                <CardContent className="pt-6 relative z-10">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wider">Services Down</p>
-                      <p className="text-4xl font-bold text-red-500">{stats?.servicesDown || 0}</p>
-                    </div>
-                    <div className="p-3.5 rounded-2xl bg-gradient-to-br from-red-500/20 to-red-500/10 border border-red-500/20 group-hover:scale-110 transition-transform">
-                      <XCircle className="h-6 w-6 text-red-500" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="border border-border/50 bg-card/50 backdrop-blur-sm shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-[1.02] group overflow-hidden relative">
-                <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                <CardContent className="pt-6 relative z-10">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wider">Avg Response</p>
-                      <p className="text-4xl font-bold bg-gradient-to-br from-blue-500 to-blue-400 bg-clip-text text-transparent">{stats?.avgResponseTime || 0}ms</p>
-                    </div>
-                    <div className="p-3.5 rounded-2xl bg-gradient-to-br from-blue-500/20 to-blue-500/10 border border-blue-500/20 group-hover:scale-110 transition-transform">
-                      <TrendingUp className="h-6 w-6 text-blue-500" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-        {/* Services Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mb-8">
-          {filteredMonitors.map((monitor, index) => (
-            <Card 
-              key={monitor.id}
-              className={`cursor-pointer transition-all duration-300 hover:shadow-2xl hover:scale-[1.02] border border-border/50 bg-card/50 backdrop-blur-sm group overflow-hidden relative animate-fade-in ${
-                selectedMonitor && String(selectedMonitor.id) === String(monitor.id)
-                  ? "ring-2 ring-primary/50 border-primary/50 shadow-xl shadow-primary/10" 
-                  : getStatusBgColor(monitor.status)
-              }`}
-              style={{ animationDelay: `${index * 50}ms` }}
-              onClick={() => setSelectedMonitor(monitor)}
-            >
-              <div className="absolute inset-0 bg-gradient-to-br from-primary/0 to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-              <CardHeader className="pb-4 relative z-10">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    {monitor.icon ? (
-                      <div className="p-2.5 rounded-xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20 group-hover:scale-110 transition-transform">
-                        <span className="text-2xl">{monitor.icon}</span>
-                      </div>
-                    ) : (
-                      <div className="p-2.5 rounded-xl bg-muted/50 border border-border/50 group-hover:scale-110 transition-transform">
-                        <Server className="h-5 w-5 text-muted-foreground" />
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <CardTitle className="text-lg font-semibold text-foreground mb-1">{monitor.name}</CardTitle>
-                      <p className="text-xs text-muted-foreground truncate">{monitor.url}</p>
-                    </div>
-                  </div>
-                  <div className={`p-2 rounded-xl border transition-all ${
-                    monitor.status === "up" 
-                      ? "bg-green-500/10 border-green-500/20 group-hover:bg-green-500/20" 
-                      : "bg-red-500/10 border-red-500/20 group-hover:bg-red-500/20"
-                  }`}>
-                    {monitor.status === "up" ? (
-                      <CheckCircle2 className={`h-5 w-5 ${getStatusColor(monitor.status)}`} />
-                    ) : (
-                      <XCircle className={`h-5 w-5 ${getStatusColor(monitor.status)}`} />
-                    )}
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="relative z-10">
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-muted-foreground">Uptime</span>
-                    <span className="text-sm font-bold text-foreground">{Math.round(monitor.uptime)}%</span>
-                  </div>
-                  {monitor.status === "up" && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-muted-foreground">Response</span>
-                      <span className="text-sm font-bold text-foreground">{monitor.responseTime}ms</span>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-muted-foreground">Last Check</span>
-                    <span className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-                      <Clock className="h-3.5 w-3.5" />
-                      {monitor.lastCheck}
-                    </span>
-                  </div>
-                  <div className="w-full bg-muted/50 rounded-full h-2.5 overflow-hidden border border-border/50">
-                    <div 
-                      className={`h-full transition-all duration-500 rounded-full ${
-                        monitor.uptime === 100 ? "bg-gradient-to-r from-green-500 to-green-400" : 
-                        monitor.uptime === 0 ? "bg-gradient-to-r from-red-500 to-red-400" : 
-                        "bg-gradient-to-r from-yellow-500 to-yellow-400"
-                      }`}
-                      style={{ width: `${monitor.uptime}%` }}
-                    />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
-            {/* Selected Service Details */}
-            {selectedMonitor && (
-          <div className="space-y-8 animate-slide-in">
-            <div className="flex items-center justify-between pb-6 border-b border-border/50">
-              <div>
-                <div className="flex items-center gap-3 mb-3">
-                  {selectedMonitor.icon ? (
-                    <div className="p-3 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 border border-primary/20">
-                      <span className="text-3xl">{selectedMonitor.icon}</span>
-                    </div>
-                  ) : (
-                    <div className="p-3 rounded-2xl bg-muted/50 border border-border/50">
-                      <Server className="h-6 w-6 text-muted-foreground" />
-                    </div>
-                  )}
-                  <div>
-                    <h2 className="text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent">{selectedMonitor.name}</h2>
-                    <p className="text-muted-foreground mt-1">{selectedMonitor.url}</p>
-                  </div>
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <Button variant="outline" size="sm" className="text-foreground border-border/50 hover:bg-muted/50 hover:border-border transition-all">
-                  <Pause className="h-4 w-4 mr-2" />
-                  Pause
-                </Button>
-                <Button variant="outline" size="sm" className="text-foreground border-border/50 hover:bg-muted/50 hover:border-border transition-all">
-                  <Edit className="h-4 w-4 mr-2" />
-                  Edit
-                </Button>
-                <Button 
-                  variant="destructive" 
-                  size="sm"
-                  className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 shadow-lg shadow-red-500/20 hover:shadow-xl hover:shadow-red-500/30 transition-all"
-                  onClick={() => selectedMonitor && deleteService(selectedMonitor.id)}
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete
-                </Button>
-              </div>
-            </div>
-
-            {/* Detailed Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-              <Card className="border border-border/50 bg-card/50 backdrop-blur-sm shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-[1.02] group overflow-hidden relative">
-                <div className="absolute inset-0 bg-gradient-to-br from-yellow-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                <CardHeader className="pb-3 relative z-10">
-                  <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                    <Zap className="h-4 w-4 text-yellow-500" />
-                    Current Response
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="relative z-10">
-                  <p className="text-4xl font-bold bg-gradient-to-br from-yellow-500 to-yellow-400 bg-clip-text text-transparent">
-                    {selectedMonitor.status === "up" ? `${selectedMonitor.responseTime}ms` : "N/A"}
+                  <p className="text-4xl font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent mb-1">
+                    {stats ? Math.round(stats.overallUptime) : 0}%
                   </p>
-                </CardContent>
-              </Card>
-              <Card className="border border-border/50 bg-card/50 backdrop-blur-sm shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-[1.02] group overflow-hidden relative">
-                <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                <CardHeader className="pb-3 relative z-10">
-                  <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                    <TrendingUp className="h-4 w-4 text-blue-500" />
-                    Avg Response (24h)
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="relative z-10">
-                  <p className="text-4xl font-bold bg-gradient-to-br from-blue-500 to-blue-400 bg-clip-text text-transparent">
-                    {responseTimeData.length > 0
-                      ? `${Math.round(
-                          responseTimeData.reduce((sum, data) => sum + data.responseTime, 0) /
-                            responseTimeData.length
-                        )}ms`
-                      : "N/A"}
+                  <p className="text-sm text-slate-400">Overall system health</p>
+                </div>
+              </motion.div>
+
+              <motion.div
+                whileHover={{ scale: 1.02, y: -4 }}
+                className="relative group overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl border border-slate-700/50 p-6 shadow-xl shadow-black/20"
+              >
+                <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="relative z-10">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 rounded-xl bg-emerald-500/20 border border-emerald-500/30">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                    </div>
+                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Online</span>
+                  </div>
+                  <p className="text-4xl font-bold text-emerald-400 mb-1">{stats?.servicesUp || 0}</p>
+                  <p className="text-sm text-slate-400">Services running</p>
+                </div>
+              </motion.div>
+
+              <motion.div
+                whileHover={{ scale: 1.02, y: -4 }}
+                className="relative group overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl border border-slate-700/50 p-6 shadow-xl shadow-black/20"
+              >
+                <div className="absolute inset-0 bg-gradient-to-br from-rose-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="relative z-10">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 rounded-xl bg-rose-500/20 border border-rose-500/30">
+                      <XCircle className="h-5 w-5 text-rose-400" />
+                    </div>
+                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Offline</span>
+                  </div>
+                  <p className="text-4xl font-bold text-rose-400 mb-1">{stats?.servicesDown || 0}</p>
+                  <p className="text-sm text-slate-400">Services down</p>
+                </div>
+              </motion.div>
+
+              <motion.div
+                whileHover={{ scale: 1.02, y: -4 }}
+                className="relative group overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl border border-slate-700/50 p-6 shadow-xl shadow-black/20"
+              >
+                <div className="absolute inset-0 bg-gradient-to-br from-amber-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="relative z-10">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 rounded-xl bg-amber-500/20 border border-amber-500/30">
+                      <Gauge className="h-5 w-5 text-amber-400" />
+                    </div>
+                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Response</span>
+                  </div>
+                  <p className="text-4xl font-bold bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent mb-1">
+                    {stats?.avgResponseTime || 0}ms
                   </p>
-                </CardContent>
-              </Card>
-              <Card className="border border-border/50 bg-card/50 backdrop-blur-sm shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-[1.02] group overflow-hidden relative">
-                <div className="absolute inset-0 bg-gradient-to-br from-green-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                <CardHeader className="pb-3 relative z-10">
-                  <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                    <Activity className="h-4 w-4 text-green-500" />
-                    Uptime (24h)
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="relative z-10">
-                  <p className="text-4xl font-bold bg-gradient-to-br from-green-500 to-green-400 bg-clip-text text-transparent">
-                    {selectedMonitor.uptime ? `${Math.round(selectedMonitor.uptime)}%` : "N/A"}
-                  </p>
-                </CardContent>
-              </Card>
-              <Card className="border border-border/50 bg-card/50 backdrop-blur-sm shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-[1.02] group overflow-hidden relative">
-                <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                <CardHeader className="pb-3 relative z-10">
-                  <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                    <AlertCircle className="h-4 w-4 text-primary" />
-                    Status
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="relative z-10">
-                  <Badge
-                    className={`${
-                      selectedMonitor.status === "up"
-                        ? "bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 shadow-lg shadow-green-500/20"
-                        : "bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 shadow-lg shadow-red-500/20"
-                    } text-white px-5 py-2.5 text-base font-semibold border-0 transition-all`}
+                  <p className="text-sm text-slate-400">Average latency</p>
+                </div>
+              </motion.div>
+            </motion.div>
+
+            {/* Services Grid - Modern Cards */}
+            <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <AnimatePresence>
+                {filteredMonitors.map((monitor, index) => (
+                  <motion.div
+                    key={monitor.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    transition={{ delay: index * 0.1, duration: 0.4 }}
+                    whileHover={{ scale: 1.02, y: -4 }}
+                    onClick={() => setSelectedMonitor(monitor)}
+                    className={`relative group cursor-pointer rounded-2xl overflow-hidden border transition-all duration-300 ${
+                      selectedMonitor && String(selectedMonitor.id) === String(monitor.id)
+                        ? "border-blue-500/50 bg-gradient-to-br from-blue-500/10 to-purple-500/10 shadow-2xl shadow-blue-500/20"
+                        : "border-slate-700/50 bg-gradient-to-br from-slate-800/50 to-slate-900/50 hover:border-slate-600/50"
+                    } backdrop-blur-xl shadow-xl shadow-black/20`}
                   >
-                    {selectedMonitor.status === "up" ? (
-                      <CheckCircle2 className="h-5 w-5 mr-2" />
-                    ) : (
-                      <XCircle className="h-5 w-5 mr-2" />
-                    )}
-                    {selectedMonitor.status === "up" ? "Online" : "Offline"}
-                  </Badge>
-                </CardContent>
-              </Card>
-            </div>
+                    <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <div className="relative p-6">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                          {monitor.icon ? (
+                            <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-blue-500/30 text-2xl">
+                              {monitor.icon}
+                            </div>
+                          ) : (
+                            <div className="p-3 rounded-xl bg-slate-700/50 border border-slate-600/50">
+                              <Server className="h-5 w-5 text-slate-400" />
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-bold text-lg text-white mb-1 truncate">{monitor.name}</h3>
+                            <p className="text-xs text-slate-400 truncate">{monitor.url}</p>
+                          </div>
+                        </div>
+                        <div className={`p-2 rounded-lg ${
+                          monitor.status === "up" 
+                            ? "bg-emerald-500/20 border border-emerald-500/30" 
+                            : "bg-rose-500/20 border border-rose-500/30"
+                        }`}>
+                          {monitor.status === "up" ? (
+                            <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                          ) : (
+                            <XCircle className="h-5 w-5 text-rose-400" />
+                          )}
+                        </div>
+                      </div>
+                      
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-slate-400">Uptime</span>
+                          <span className="font-bold text-white">{Math.round(monitor.uptime)}%</span>
+                        </div>
+                        {monitor.status === "up" && (
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-slate-400">Response</span>
+                            <span className="font-bold text-white">{monitor.responseTime}ms</span>
+                          </div>
+                        )}
+                        <div className="w-full bg-slate-700/50 rounded-full h-2 overflow-hidden">
+                          <motion.div
+                            initial={{ width: 0 }}
+                            animate={{ width: `${monitor.uptime}%` }}
+                            transition={{ duration: 1, ease: "easeOut" }}
+                            className={`h-full rounded-full ${
+                              monitor.uptime === 100 ? "bg-gradient-to-r from-emerald-500 to-emerald-400" :
+                              monitor.uptime === 0 ? "bg-gradient-to-r from-rose-500 to-rose-400" :
+                              "bg-gradient-to-r from-amber-500 to-amber-400"
+                            }`}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </motion.div>
 
-            {/* Response Time Chart */}
-            <Card className="border border-border/50 bg-card/50 backdrop-blur-sm shadow-lg">
-              <CardHeader className="pb-4">
-                <CardTitle className="text-xl font-bold text-foreground flex items-center gap-3">
-                  <div className="p-2 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 border border-primary/20">
-                    <TrendingUp className="h-5 w-5 text-primary" />
+            {/* Selected Monitor Details */}
+            <AnimatePresence>
+              {selectedMonitor && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  transition={{ duration: 0.4 }}
+                  className="space-y-6"
+                >
+                  <div className="rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl border border-slate-700/50 p-8 shadow-2xl shadow-black/30">
+                    <div className="flex items-center justify-between mb-8">
+                      <div className="flex items-center gap-4">
+                        {selectedMonitor.icon ? (
+                          <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-blue-500/30 text-4xl">
+                            {selectedMonitor.icon}
+                          </div>
+                        ) : (
+                          <div className="p-4 rounded-2xl bg-slate-700/50 border border-slate-600/50">
+                            <Globe className="h-8 w-8 text-slate-400" />
+                          </div>
+                        )}
+                        <div>
+                          <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent mb-1">
+                            {selectedMonitor.name}
+                          </h2>
+                          <p className="text-slate-400">{selectedMonitor.url}</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-3">
+                        <Button variant="outline" size="sm" className="border-slate-700/50 hover:bg-slate-800/50">
+                          <Pause className="h-4 w-4 mr-2" />
+                          Pause
+                        </Button>
+                        <Button variant="outline" size="sm" className="border-slate-700/50 hover:bg-slate-800/50">
+                          <Edit className="h-4 w-4 mr-2" />
+                          Edit
+                        </Button>
+                        <Button 
+                          variant="destructive" 
+                          size="sm"
+                          className="bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700"
+                          onClick={() => selectedMonitor && deleteService(selectedMonitor.id)}
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                      <div className="rounded-xl bg-slate-800/30 border border-slate-700/50 p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Zap className="h-4 w-4 text-amber-400" />
+                          <span className="text-xs font-semibold text-slate-400 uppercase">Current</span>
+                        </div>
+                        <p className="text-2xl font-bold text-white">
+                          {selectedMonitor.status === "up" ? `${selectedMonitor.responseTime}ms` : "N/A"}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-slate-800/30 border border-slate-700/50 p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <TrendingUp className="h-4 w-4 text-blue-400" />
+                          <span className="text-xs font-semibold text-slate-400 uppercase">Avg (24h)</span>
+                        </div>
+                        <p className="text-2xl font-bold text-white">
+                          {responseTimeData.length > 0
+                            ? `${Math.round(responseTimeData.reduce((sum, data) => sum + data.responseTime, 0) / responseTimeData.length)}ms`
+                            : "N/A"}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-slate-800/30 border border-slate-700/50 p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Activity className="h-4 w-4 text-emerald-400" />
+                          <span className="text-xs font-semibold text-slate-400 uppercase">Uptime</span>
+                        </div>
+                        <p className="text-2xl font-bold text-white">
+                          {selectedMonitor.uptime ? `${Math.round(selectedMonitor.uptime)}%` : "N/A"}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-slate-800/30 border border-slate-700/50 p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <AlertCircle className="h-4 w-4 text-primary" />
+                          <span className="text-xs font-semibold text-slate-400 uppercase">Status</span>
+                        </div>
+                        <Badge
+                          className={`${
+                            selectedMonitor.status === "up"
+                              ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
+                              : "bg-rose-500/20 text-rose-400 border-rose-500/30"
+                          } border px-3 py-1`}
+                        >
+                          {selectedMonitor.status === "up" ? "Online" : "Offline"}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl bg-slate-800/30 border border-slate-700/50 p-6">
+                      <div className="flex items-center gap-3 mb-6">
+                        <BarChart3 className="h-5 w-5 text-blue-400" />
+                        <h3 className="text-lg font-bold text-white">Response Time History</h3>
+                      </div>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <AreaChart data={responseTimeData}>
+                          <defs>
+                            <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3}/>
+                              <stop offset="95%" stopColor="#22c55e" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.3} />
+                          <XAxis 
+                            dataKey="time" 
+                            tick={{ fill: "#94a3b8", fontSize: 12 }}
+                            stroke="#475569"
+                          />
+                          <YAxis 
+                            tick={{ fill: "#94a3b8", fontSize: 12 }}
+                            stroke="#475569"
+                            domain={[0, 1200]}
+                          />
+                          <Tooltip 
+                            contentStyle={{ 
+                              backgroundColor: "#1e293b",
+                              border: "1px solid #334155",
+                              borderRadius: "8px",
+                              color: "#f1f5f9"
+                            }}
+                            formatter={(value: number | undefined) => [
+                              value !== undefined ? `${value.toFixed(2)} ms` : "N/A",
+                              "Response Time"
+                            ]}
+                          />
+                          <Area 
+                            type="monotone" 
+                            dataKey="responseTime" 
+                            stroke="#22c55e"
+                            strokeWidth={2}
+                            fill="url(#colorGradient)"
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
-                  Response Time History
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={350}>
-                  <LineChart data={responseTimeData} margin={{ top: 10, right: 30, left: 10, bottom: 10 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.2} />
-                    <XAxis 
-                      dataKey="time" 
-                      tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12, fontWeight: 500 }}
-                      stroke="hsl(var(--border))"
-                      strokeWidth={1}
-                      strokeOpacity={0.5}
-                    />
-                    <YAxis 
-                      tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12, fontWeight: 500 }}
-                      stroke="hsl(var(--border))"
-                      strokeWidth={1}
-                      strokeOpacity={0.5}
-                      domain={[0, 1200]}
-                      label={{ value: 'ms', angle: -90, position: 'insideLeft', fill: "hsl(var(--muted-foreground))", style: { fontWeight: 500, fontSize: 12 } }}
-                    />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "8px",
-                        color: "hsl(var(--foreground))",
-                        boxShadow: "0 10px 40px rgba(0,0,0,0.2)"
-                      }}
-                      labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
-                      formatter={(value: number | undefined) => [
-                        value !== undefined ? `${value.toFixed(2)} ms` : "N/A",
-                        "Response Time"
-                      ]}
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="responseTime" 
-                      stroke="url(#colorGradient)"
-                      strokeWidth={3}
-                      dot={false}
-                      activeDot={{ r: 7, fill: "#22c55e", stroke: "#fff", strokeWidth: 2 }}
-                    />
-                    <defs>
-                      <linearGradient id="colorGradient" x1="0" y1="0" x2="1" y2="0">
-                        <stop offset="0%" stopColor="#22c55e" />
-                        <stop offset="100%" stopColor="#10b981" />
-                      </linearGradient>
-                    </defs>
-                  </LineChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-            </div>
-            )}
-          </>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
         )}
       </div>
 
       {/* Add Service Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="sm:max-w-[425px] bg-slate-900 border-slate-700">
           <DialogHeader>
-            <DialogTitle>Add New Service</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-white">Add New Service</DialogTitle>
+            <DialogDescription className="text-slate-400">
               Add a new service to monitor. Enter the service name and URL.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="name">Service Name</Label>
+              <Label htmlFor="name" className="text-slate-300">Service Name</Label>
               <Input
                 id="name"
                 placeholder="My Service"
                 value={newService.name}
                 onChange={(e) => setNewService({ ...newService, name: e.target.value })}
+                className="bg-slate-800 border-slate-700 text-white"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="url">URL</Label>
+              <Label htmlFor="url" className="text-slate-300">URL</Label>
               <Input
                 id="url"
                 placeholder="https://example.com"
                 value={newService.url}
                 onChange={(e) => setNewService({ ...newService, url: e.target.value })}
+                className="bg-slate-800 border-slate-700 text-white"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="icon">Icon (optional)</Label>
+              <Label htmlFor="icon" className="text-slate-300">Icon (optional)</Label>
               <Input
                 id="icon"
                 placeholder="📧"
                 value={newService.icon}
                 onChange={(e) => setNewService({ ...newService, icon: e.target.value })}
+                className="bg-slate-800 border-slate-700 text-white"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="checkInterval">Check Interval (seconds)</Label>
+              <Label htmlFor="checkInterval" className="text-slate-300">Check Interval (seconds)</Label>
               <Input
                 id="checkInterval"
                 type="number"
@@ -651,8 +660,9 @@ export function App() {
                 placeholder="60"
                 value={newService.checkInterval}
                 onChange={(e) => setNewService({ ...newService, checkInterval: parseInt(e.target.value) || 60 })}
+                className="bg-slate-800 border-slate-700 text-white"
               />
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-slate-500">
                 How often to check this service (10-3600 seconds, default: 60)
               </p>
             </div>
@@ -662,20 +672,21 @@ export function App() {
                 id="thirdParty"
                 checked={newService.isThirdParty}
                 onChange={(e) => setNewService({ ...newService, isThirdParty: e.target.checked })}
-                className="rounded border-gray-300"
+                className="rounded border-slate-600 bg-slate-800"
               />
-              <Label htmlFor="thirdParty" className="text-sm font-normal">
+              <Label htmlFor="thirdParty" className="text-sm font-normal text-slate-300">
                 Third-party service
               </Label>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setDialogOpen(false)} className="border-slate-700">
               Cancel
             </Button>
             <Button 
               onClick={createService}
               disabled={!newService.name || !newService.url}
+              className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
             >
               Add Service
             </Button>
