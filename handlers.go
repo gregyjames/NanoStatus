@@ -63,9 +63,14 @@ func getResponseTimeData(monitorID string, timeRange string) []ResponseTimeData 
 		return []ResponseTimeData{}
 	}
 
-	// Convert to response time data format with appropriate time formatting
+	// Convert to response time data format
+	// Send ISO 8601 timestamps and let the frontend format them in the user's timezone
 	data := make([]ResponseTimeData, len(checks))
 	for i, check := range checks {
+		// Send ISO 8601 timestamp (UTC) - frontend will format in user's timezone
+		isoTimestamp := check.CreatedAt.Format(time.RFC3339)
+		
+		// Also provide a fallback formatted string (UTC) for backwards compatibility
 		var timeStr string
 		switch timeRange {
 		case "1h", "12h", "24h":
@@ -79,7 +84,8 @@ func getResponseTimeData(monitorID string, timeRange string) []ResponseTimeData 
 		}
 		
 		data[i] = ResponseTimeData{
-			Time:         timeStr,
+			Time:         timeStr,      // Fallback (will be overridden by frontend)
+			Timestamp:    isoTimestamp, // ISO 8601 timestamp for client-side formatting
 			ResponseTime: float64(check.ResponseTime),
 		}
 	}

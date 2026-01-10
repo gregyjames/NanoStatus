@@ -25,6 +25,42 @@ export function MonitorDetails({ monitor, responseTimeData, onDelete, onEdit, on
   // Time range state (default to 24h, but show as "12h" initially for better UX)
   const [timeRange, setTimeRange] = useState<string>("12h");
   
+  // Format timestamp in user's local timezone
+  const formatTime = (data: ResponseTimeData, range: string): string => {
+    if (data.timestamp) {
+      try {
+        const date = new Date(data.timestamp);
+        if (isNaN(date.getTime())) {
+          // Invalid date, fallback to provided time string
+          return data.time;
+        }
+        switch (range) {
+          case "1h":
+          case "12h":
+          case "24h":
+            return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+          case "1w":
+            return date.toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
+          case "1y":
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          default:
+            return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        }
+      } catch (e) {
+        // Error parsing date, fallback to provided time string
+        return data.time;
+      }
+    }
+    // Fallback to provided time string
+    return data.time;
+  };
+  
+  // Format response time data with local timezone (recalculates when timeRange or responseTimeData changes)
+  const formattedResponseTimeData = responseTimeData.map(data => ({
+    ...data,
+    time: formatTime(data, timeRange)
+  }));
+  
   // Calculate seconds since last update
   const [secondsSinceUpdate, setSecondsSinceUpdate] = useState<number>(0);
   
@@ -256,7 +292,7 @@ export function MonitorDetails({ monitor, responseTimeData, onDelete, onEdit, on
               </div>
             </div>
             <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={responseTimeData}>
+              <AreaChart data={formattedResponseTimeData}>
                 <defs>
                   <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3}/>

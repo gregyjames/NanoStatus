@@ -22,6 +22,7 @@ export interface Stats {
 
 export interface ResponseTimeData {
   time: string;
+  timestamp?: string; // ISO 8601 timestamp for client-side formatting
   responseTime: number;
 }
 

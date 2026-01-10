@@ -47,7 +47,8 @@ type CheckHistory struct {
 
 // ResponseTimeData represents formatted response time data for charts
 type ResponseTimeData struct {
-	Time         string  `json:"time"`
+	Time         string  `json:"time"`         // Formatted time string (for display)
+	Timestamp    string  `json:"timestamp"`    // ISO 8601 timestamp (for client-side formatting)
 	ResponseTime float64 `json:"responseTime"`
 }
 
