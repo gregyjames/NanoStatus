@@ -306,3 +306,7 @@ Built with:
 - [shadcn/ui](https://ui.shadcn.com) - UI components
 - [GORM](https://gorm.io) - ORM
 - [SQLite](https://sqlite.org) - Database
+
+### Icon Attribution
+
+The favicon/logo is from the [small-n-flat](http://paomedia.github.io/small-n-flat/) icon set, licensed under [CC0 1.0 Universal](http://creativecommons.org/publicdomain/zero/1.0/). See [ICON_LICENSE](ICON_LICENSE) for full license text.
