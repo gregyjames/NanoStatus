@@ -276,28 +276,29 @@ export function App() {
             <StatsGrid stats={stats} />
             {/* Mobile/Tablet: Stack services and details */}
             <div className="lg:hidden space-y-6">
-              <div>
-                <h2 className="text-lg font-bold text-white mb-4">Services</h2>
-                <ServicesGrid
-                  monitors={filteredMonitors}
-                  selectedMonitor={selectedMonitor}
-                  onSelectMonitor={setSelectedMonitor}
-                />
-              </div>
               {selectedMonitor ? (
-                <MonitorDetails
-                  monitor={selectedMonitor}
-                  responseTimeData={responseTimeData}
-                  onDelete={deleteService}
-                  onEdit={handleEdit}
-                  onTogglePause={togglePause}
-                />
+                <>
+                  <ServicesGrid
+                    monitors={filteredMonitors}
+                    selectedMonitor={selectedMonitor}
+                    onSelectMonitor={setSelectedMonitor}
+                  />
+                  <MonitorDetails
+                    monitor={selectedMonitor}
+                    responseTimeData={responseTimeData}
+                    onDelete={deleteService}
+                    onEdit={handleEdit}
+                    onTogglePause={togglePause}
+                  />
+                </>
               ) : (
-                <div className="rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl border border-slate-700/50 p-12 shadow-2xl shadow-black/30 flex items-center justify-center min-h-[400px]">
-                  <div className="text-center">
-                    <p className="text-xl text-slate-400 mb-2">Select a service to view details</p>
-                    <p className="text-sm text-slate-500">Choose a service from above</p>
-                  </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white mb-4">Services</h2>
+                  <ServicesGrid
+                    monitors={filteredMonitors}
+                    selectedMonitor={selectedMonitor}
+                    onSelectMonitor={setSelectedMonitor}
+                  />
                 </div>
               )}
             </div>
