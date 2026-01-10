@@ -216,10 +216,10 @@ export function App() {
 
   useEffect(() => {
     fetchMonitors();
-    fetchStats();
+    fetchStats(); // Initial fetch only
   }, [fetchMonitors, fetchStats]);
 
-  // Set up SSE connection for real-time updates
+  // Set up SSE connection for real-time updates (replaces polling)
   useEffect(() => {
     const eventSource = new EventSource("/api/events");
     
@@ -287,19 +287,12 @@ export function App() {
 
   useEffect(() => {
     if (selectedMonitor) {
+      // Initial fetch only - updates will come via SSE when implemented
       fetchResponseTimeData(String(selectedMonitor.id));
     }
   }, [selectedMonitor, fetchResponseTimeData]);
 
-  useEffect(() => {
-    if (!selectedMonitor) return;
-
-    const interval = setInterval(() => {
-      fetchResponseTimeData(String(selectedMonitor.id));
-    }, 10000);
-
-    return () => clearInterval(interval);
-  }, [selectedMonitor, fetchResponseTimeData]);
+  // Removed polling for response time data - will be handled via SSE in future
 
   const filteredMonitors = monitors.filter(monitor =>
     monitor.name.toLowerCase().includes(searchQuery.toLowerCase())

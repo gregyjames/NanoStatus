@@ -27,6 +27,15 @@ var staticFiles embed.FS
 
 var db *gorm.DB
 
+// Cached stats for comparison to avoid unnecessary broadcasts
+var (
+	lastStats      *StatsResponse
+	statsMu        sync.RWMutex
+	statsUpdateCh  chan struct{}
+	statsDebouncer *time.Timer
+	debounceMu     sync.Mutex
+)
+
 // SSE broadcaster for real-time updates
 type SSEClient struct {
 	ID   string
@@ -105,6 +114,52 @@ func broadcastUpdate(updateType string, data interface{}) {
 	
 	log.Printf("[SSE] Broadcasting %s update (%d bytes)", updateType, len(jsonData))
 	go sseBroadcaster.broadcastMessage(jsonData)
+}
+
+// Broadcast stats only if they've changed
+func broadcastStatsIfChanged() {
+	debounceMu.Lock()
+	defer debounceMu.Unlock()
+	
+	// Reset debounce timer
+	if statsDebouncer != nil {
+		statsDebouncer.Stop()
+	}
+	
+	// Debounce: wait 500ms after last monitor update before calculating stats
+	statsDebouncer = time.AfterFunc(500*time.Millisecond, func() {
+		newStats := getStats()
+		
+		statsMu.Lock()
+		var oldUptime float64
+		var oldUpInt, oldDownInt, oldAvgInt int
+		if lastStats != nil {
+			oldUptime = lastStats.OverallUptime
+			oldUpInt = lastStats.ServicesUp
+			oldDownInt = lastStats.ServicesDown
+			oldAvgInt = lastStats.AvgResponseTime
+		}
+		
+		changed := lastStats == nil || 
+			lastStats.OverallUptime != newStats.OverallUptime ||
+			lastStats.ServicesUp != newStats.ServicesUp ||
+			lastStats.ServicesDown != newStats.ServicesDown ||
+			lastStats.AvgResponseTime != newStats.AvgResponseTime
+		
+		if changed {
+			log.Printf("[SSE] Stats changed - broadcasting update (uptime: %.2f%% -> %.2f%%, up: %d -> %d, down: %d -> %d, avg: %dms -> %dms)",
+				oldUptime, newStats.OverallUptime,
+				oldUpInt, newStats.ServicesUp,
+				oldDownInt, newStats.ServicesDown,
+				oldAvgInt, newStats.AvgResponseTime)
+			lastStats = &newStats
+			statsMu.Unlock()
+			broadcastUpdate("stats_update", newStats)
+		} else {
+			statsMu.Unlock()
+			log.Printf("[SSE] Stats unchanged, skipping broadcast")
+		}
+	})
 }
 
 type Monitor struct {
@@ -431,12 +486,11 @@ func checkService(monitor *Monitor) {
 	monitor.UpdatedAt = now
 	db.Save(monitor)
 
-	// Broadcast update via SSE
+	// Broadcast monitor update via SSE
 	broadcastUpdate("monitor_update", monitor)
 	
-	// Also broadcast stats update
-	stats := getStats()
-	broadcastUpdate("stats_update", stats)
+	// Schedule stats update (debounced to batch rapid updates)
+	broadcastStatsIfChanged()
 }
 
 func checkAllServices() {
@@ -876,9 +930,8 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 		// Broadcast deletion via SSE
 		broadcastUpdate("monitor_deleted", map[string]interface{}{"id": monitorID})
 		
-		// Broadcast stats update
-		stats := getStats()
-		broadcastUpdate("stats_update", stats)
+		// Schedule stats update (debounced)
+		broadcastStatsIfChanged()
 		
 		w.WriteHeader(http.StatusNoContent)
 		return
