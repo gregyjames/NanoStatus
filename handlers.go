@@ -37,7 +37,7 @@ func getResponseTimeData(monitorID string, timeRange string) []ResponseTimeData 
 
 	// Get checks within time range, ordered by creation time
 	var checks []CheckHistory
-	query := db.Where("monitor_id = ? AND created_at > ?", id, cutoffTime).
+	query := db.Where("monitor_id = ? AND created_at > ? AND status = ? AND response_time > 0", id, cutoffTime, "up").
 		Order("created_at ASC")
 	
 	// Limit results based on time range to avoid too much data
