@@ -175,20 +175,35 @@ func getStats() StatsResponse {
 	var avgResponseTime int
 	twentyFourHoursAgo := time.Now().Add(-24 * time.Hour)
 	
-	var result struct {
-		AvgResponseTime float64
-		Count           int64
+	// Use raw SQL query to get average response time (GORM uses snake_case for column names)
+	var avgResult sql.NullFloat64
+	var countResult int64
+	
+	// Get count first
+	db.Model(&CheckHistory{}).
+		Where("created_at > ? AND response_time > 0", twentyFourHoursAgo).
+		Count(&countResult)
+	
+	if countResult > 0 {
+		// Use raw SQL to ensure correct column name
+		err := db.Raw(`
+			SELECT AVG(response_time) as avg_response_time 
+			FROM check_histories 
+			WHERE created_at > ? AND response_time > 0
+		`, twentyFourHoursAgo).Row().Scan(&avgResult)
+		
+		if err == nil && avgResult.Valid {
+			avgResponseTime = int(avgResult.Float64)
+			log.Printf("[Stats] Calculated avg response time from %d checks: %dms", countResult, avgResponseTime)
+		} else {
+			log.Printf("[Stats] Error calculating avg response time: %v (count: %d)", err, countResult)
+		}
+	} else {
+		log.Printf("[Stats] No check history found in last 24 hours")
 	}
 	
-	db.Model(&CheckHistory{}).
-		Select("AVG(response_time) as avg_response_time, COUNT(*) as count").
-		Where("created_at > ? AND response_time > 0", twentyFourHoursAgo).
-		Scan(&result)
-	
-	if result.Count > 0 {
-		avgResponseTime = int(result.AvgResponseTime)
-	} else {
-		// Fallback: calculate from current monitor response times if no history
+	// Fallback: calculate from current monitor response times if no history or query failed
+	if countResult == 0 || avgResponseTime == 0 {
 		totalResponseTime := 0
 		responseCount := 0
 		for _, monitor := range monitors {
@@ -199,6 +214,7 @@ func getStats() StatsResponse {
 		}
 		if responseCount > 0 {
 			avgResponseTime = totalResponseTime / responseCount
+			log.Printf("[Stats] Using fallback: avg response time from %d monitors: %dms", responseCount, avgResponseTime)
 		}
 	}
 

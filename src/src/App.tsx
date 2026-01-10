@@ -104,6 +104,7 @@ export function App() {
     try {
       const response = await fetch("/api/stats?t=" + Date.now()); // Add cache busting
       const data = await response.json();
+      console.log("Stats updated:", data);
       setStats(data);
       setLastUpdate(new Date());
     } catch (error) {
@@ -455,7 +456,14 @@ export function App() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-3xl font-bold text-foreground">138ms</p>
+                  <p className="text-3xl font-bold text-foreground">
+                    {responseTimeData.length > 0
+                      ? `${Math.round(
+                          responseTimeData.reduce((sum, data) => sum + data.responseTime, 0) /
+                            responseTimeData.length
+                        )}ms`
+                      : "N/A"}
+                  </p>
                 </CardContent>
               </Card>
               <Card>
@@ -466,7 +474,9 @@ export function App() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-3xl font-bold text-foreground">100%</p>
+                  <p className="text-3xl font-bold text-foreground">
+                    {selectedMonitor.uptime ? `${Math.round(selectedMonitor.uptime)}%` : "N/A"}
+                  </p>
                 </CardContent>
               </Card>
               <Card>
