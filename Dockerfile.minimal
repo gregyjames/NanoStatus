@@ -1,0 +1,60 @@
+# Build stage for frontend
+FROM oven/bun:1-slim AS frontend-builder
+WORKDIR /app
+COPY src/package.json src/bun.lock* ./
+RUN bun install --frozen-lockfile
+COPY src/ ./src/
+WORKDIR /app/src
+RUN bun run build.ts --outdir=../dist && \
+    find ../dist -type f -name "*.map" -delete && \
+    find ../dist -type d -empty -delete
+
+# Build stage for Go backend with UPX compression
+FROM golang:alpine AS golang
+
+# Create appuser
+ENV USER=appuser
+ENV UID=10001
+RUN adduser \    
+    --disabled-password \    
+    --gecos "" \    
+    --home "/nonexistent" \    
+    --shell "/sbin/nologin" \    
+    --no-create-home \    
+    --uid "${UID}" \    
+    "${USER}"
+
+WORKDIR /app
+
+COPY go.mod go.sum* ./
+RUN go mod download && go mod verify
+RUN apk add --no-cache upx
+
+COPY *.go ./
+COPY --from=frontend-builder /app/dist ./dist
+
+# Build for multiple architectures
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -gcflags=all="-l" -trimpath -o /server .
+
+# Compress with UPX (continue even if UPX fails on some architectures)
+RUN upx -9 -v --ultra-brute --lzma --best /server 2>&1 || echo "UPX compression failed, continuing with uncompressed binary"
+
+# Final stage - scratch (minimal)
+FROM scratch
+
+COPY --from=golang /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=golang /etc/passwd /etc/passwd
+COPY --from=golang /etc/group /etc/group
+
+COPY --from=golang /server /nanostatus
+
+ENV PORT=8080
+ENV DB_PATH=/data/nanostatus.db
+EXPOSE 8080
+VOLUME ["/data"]
+USER appuser:appuser
+
+ENTRYPOINT ["/nanostatus"]
+
