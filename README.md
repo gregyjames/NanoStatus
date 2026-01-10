@@ -1,3 +1,8 @@
+[![Docker Image CI](https://github.com/gregyjames/NanoStatus/actions/workflows/docker-image.yml/badge.svg)](https://github.com/gregyjames/NanoStatus/actions/workflows/docker-image.yml)
+![GitHub repo size](https://img.shields.io/github/repo-size/gregyjames/NanoStatus)
+![Docker Image Size (tag)](https://img.shields.io/docker/image-size/gjames8/nanostatus/latest)
+![Docker Pulls](https://img.shields.io/docker/pulls/gjames8/nanostatus)
+
 # NanoStatus
 
 Finally got a cursor subscription so wanted to build something cool. NanoStatus is a lightweight, single-container monitoring dashboard built with Go and React. Monitor your services' uptime, response times, and health in real-time with a beautiful, modern interface. I personally made this for my PiZero, UptimeKuma was a little too heavy so wanted to make something a little lighter. 
@@ -172,9 +177,18 @@ When creating a monitor, you can configure:
 
 ```
 .
-├── main.go              # Go backend server
+├── main.go              # Main server entry point and routing
+├── models.go            # Data models and structures
+├── database.go          # Database initialization and seeding
+├── checker.go           # Service health checking logic
+├── stats.go             # Statistics calculation
+├── sse.go               # Server-Sent Events broadcasting
+├── handlers.go          # HTTP API endpoint handlers
+├── cleanup.go           # Background cleanup jobs
 ├── go.mod               # Go dependencies
-├── Dockerfile           # Multi-stage Docker build
+├── go.sum               # Go dependency checksums
+├── Dockerfile           # Standard multi-stage Docker build (distroless)
+├── Dockerfile.minimal   # Minimal Docker build with UPX compression (scratch)
 ├── Makefile             # Build automation
 ├── dist/                # Frontend build output (generated)
 ├── nanostatus.db        # SQLite database (generated)
@@ -188,7 +202,8 @@ When creating a monitor, you can configure:
 │   │   │   ├── ServiceCard.tsx
 │   │   │   ├── MonitorDetails.tsx
 │   │   │   ├── AddServiceDialog.tsx
-│   │   │   └── EditServiceDialog.tsx
+│   │   │   ├── EditServiceDialog.tsx
+│   │   │   └── ui/      # shadcn/ui components
 │   │   ├── types/       # TypeScript type definitions
 │   │   └── ...
 │   └── package.json
