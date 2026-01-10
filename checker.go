@@ -45,6 +45,10 @@ func checkService(monitor *Monitor) {
 			responseTime = 0
 		} else {
 			req.Header.Set("User-Agent", "NanoStatus/1.0")
+			req.Header.Set("Cache-Control", "no-cache, no-store, must-revalidate")
+    		req.Header.Set("Pragma", "no-cache")
+    		req.Header.Set("Expires", "0")
+			//req.URL.RawQuery = fmt.Sprintf("_t=%d", time.Now().UnixNano())
 			resp, err := client.Do(req)
 			elapsed := time.Since(start)
 			responseTime = int(elapsed.Milliseconds())
