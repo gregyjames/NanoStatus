@@ -146,6 +146,7 @@ func syncYAMLConfig(dbPath string) {
 		var existingMonitor Monitor
 		result := db.Where("name = ? AND url = ?", monitor.Name, monitor.URL).First(&existingMonitor)
 		
+		// Check if record exists (ignore "record not found" error as it's expected)
 		if result.Error == nil {
 			// Monitor with same name/URL exists
 			if existingMonitor.ConfigHash == "" {
