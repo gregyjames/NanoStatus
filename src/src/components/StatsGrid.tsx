@@ -70,7 +70,7 @@ export function StatsGrid({ stats }: StatsGridProps) {
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Online</span>
           </div>
           <p className="text-4xl font-bold text-emerald-400 mb-1">{stats?.servicesUp || 0}</p>
-          <p className="text-sm text-slate-400">Services running</p>
+          <p className="text-sm text-slate-400">Services online</p>
         </div>
       </motion.div>
 

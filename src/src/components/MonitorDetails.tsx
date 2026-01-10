@@ -1,5 +1,6 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { Pause, Edit, Trash2, Zap, TrendingUp, Activity, AlertCircle, BarChart3, Globe } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Pause, Play, Edit, Trash2, Zap, TrendingUp, Activity, AlertCircle, BarChart3, Globe, Clock, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
@@ -10,12 +11,77 @@ interface MonitorDetailsProps {
   responseTimeData: ResponseTimeData[];
   onDelete: (id: string | number) => void;
   onEdit: (monitor: Monitor) => void;
+  onTogglePause: (id: string | number, paused: boolean) => void;
 }
 
-export function MonitorDetails({ monitor, responseTimeData, onDelete, onEdit }: MonitorDetailsProps) {
+export function MonitorDetails({ monitor, responseTimeData, onDelete, onEdit, onTogglePause }: MonitorDetailsProps) {
   const avgResponseTime = responseTimeData.length > 0
     ? Math.round(responseTimeData.reduce((sum, data) => sum + data.responseTime, 0) / responseTimeData.length)
     : 0;
+
+  const isPaused = monitor.paused || false;
+  
+  // Calculate seconds since last update
+  const [secondsSinceUpdate, setSecondsSinceUpdate] = useState<number>(0);
+  
+  // Format time in the best unit
+  const formatTimeAgo = (seconds: number): string => {
+    if (seconds < 60) {
+      return `${seconds}s ago`;
+    } else if (seconds < 3600) {
+      const minutes = Math.floor(seconds / 60);
+      return `${minutes}${minutes === 1 ? ' minute' : ' minutes'} ago`;
+    } else if (seconds < 86400) {
+      const hours = Math.floor(seconds / 3600);
+      return `${hours}${hours === 1 ? ' hour' : ' hours'} ago`;
+    } else if (seconds < 604800) {
+      const days = Math.floor(seconds / 86400);
+      return `${days}${days === 1 ? ' day' : ' days'} ago`;
+    } else if (seconds < 2592000) {
+      const weeks = Math.floor(seconds / 604800);
+      return `${weeks}${weeks === 1 ? ' week' : ' weeks'} ago`;
+    } else if (seconds < 31536000) {
+      const months = Math.floor(seconds / 2592000);
+      return `${months}${months === 1 ? ' month' : ' months'} ago`;
+    } else {
+      const years = Math.floor(seconds / 31536000);
+      return `${years}${years === 1 ? ' year' : ' years'} ago`;
+    }
+  };
+  
+  useEffect(() => {
+    const calculateSeconds = () => {
+      if (monitor.updatedAt) {
+        const updatedAt = new Date(monitor.updatedAt);
+        const now = new Date();
+        const diffSeconds = Math.floor((now.getTime() - updatedAt.getTime()) / 1000);
+        setSecondsSinceUpdate(Math.max(0, diffSeconds));
+      } else {
+        // Fallback: parse lastCheck string
+        const lastCheckStr = monitor.lastCheck || "";
+        const lastCheck = lastCheckStr.toLowerCase();
+        if (lastCheck === "just now" || lastCheck === "never" || lastCheck === "") {
+          setSecondsSinceUpdate(0);
+        } else if (lastCheck.includes("s ago")) {
+          const match = lastCheck.match(/(\d+)s ago/);
+          setSecondsSinceUpdate(match && match[1] ? parseInt(match[1], 10) : 0);
+        } else if (lastCheck.includes("m ago")) {
+          const match = lastCheck.match(/(\d+)m ago/);
+          setSecondsSinceUpdate(match && match[1] ? parseInt(match[1], 10) * 60 : 0);
+        } else if (lastCheck.includes("h ago")) {
+          const match = lastCheck.match(/(\d+)h ago/);
+          setSecondsSinceUpdate(match && match[1] ? parseInt(match[1], 10) * 3600 : 0);
+        } else {
+          setSecondsSinceUpdate(0);
+        }
+      }
+    };
+    
+    calculateSeconds();
+    const interval = setInterval(calculateSeconds, 1000);
+    
+    return () => clearInterval(interval);
+  }, [monitor.updatedAt, monitor.lastCheck]);
 
   return (
     <AnimatePresence>
@@ -26,7 +92,15 @@ export function MonitorDetails({ monitor, responseTimeData, onDelete, onEdit }: 
         transition={{ duration: 0.4 }}
         className="space-y-6"
       >
-        <div className="rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl border border-slate-700/50 p-8 shadow-2xl shadow-black/30">
+        <div className={`rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl border p-8 shadow-2xl shadow-black/30 ${
+          isPaused ? "border-amber-500/30 bg-gradient-to-br from-amber-500/5 to-slate-900/50" : "border-slate-700/50"
+        }`}>
+          {isPaused && (
+            <div className="mb-4 p-3 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center gap-2">
+              <Pause className="h-4 w-4 text-amber-400" />
+              <span className="text-sm font-semibold text-amber-400">Monitoring is paused</span>
+            </div>
+          )}
           <div className="flex items-center justify-between mb-8">
             <div className="flex items-center gap-4">
               {monitor.icon ? (
@@ -42,17 +116,39 @@ export function MonitorDetails({ monitor, responseTimeData, onDelete, onEdit }: 
                 <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent mb-1">
                   {monitor.name}
                 </h2>
-                <p className="text-slate-400">{monitor.url}</p>
+                <p className="text-slate-400 mb-2">{monitor.url}</p>
+                <div className="flex items-center gap-4 text-xs text-slate-500">
+                  <div className="flex items-center gap-1.5">
+                    <Clock className="h-3.5 w-3.5" />
+                    <span>Last update: {secondsSinceUpdate === 0 ? "just now" : formatTimeAgo(secondsSinceUpdate)}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    <span>Interval: {monitor.checkInterval || 60}s</span>
+                  </div>
+                </div>
               </div>
             </div>
             <div className="flex gap-3">
               <Button 
                 variant="outline" 
                 size="sm" 
-                className="border-slate-700/50 bg-slate-800/30 text-white hover:bg-slate-700/50 hover:text-white hover:border-slate-600/50"
+                className={`border-slate-700/50 bg-slate-800/30 text-white hover:bg-slate-700/50 hover:text-white hover:border-slate-600/50 ${
+                  isPaused ? "border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20" : ""
+                }`}
+                onClick={() => onTogglePause(monitor.id, !isPaused)}
               >
-                <Pause className="h-4 w-4 mr-2" />
-                Pause
+                {isPaused ? (
+                  <>
+                    <Play className="h-4 w-4 mr-2" />
+                    Resume
+                  </>
+                ) : (
+                  <>
+                    <Pause className="h-4 w-4 mr-2" />
+                    Pause
+                  </>
+                )}
               </Button>
               <Button 
                 variant="outline" 
@@ -108,15 +204,21 @@ export function MonitorDetails({ monitor, responseTimeData, onDelete, onEdit }: 
                 <AlertCircle className="h-4 w-4 text-primary" />
                 <span className="text-xs font-semibold text-slate-400 uppercase">Status</span>
               </div>
-              <Badge
-                className={`${
-                  monitor.status === "up"
-                    ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
-                    : "bg-rose-500/20 text-rose-400 border-rose-500/30"
-                } border px-3 py-1`}
-              >
-                {monitor.status === "up" ? "Online" : "Offline"}
-              </Badge>
+              {isPaused ? (
+                <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 border px-3 py-1">
+                  Paused
+                </Badge>
+              ) : (
+                <Badge
+                  className={`${
+                    monitor.status === "up"
+                      ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
+                      : "bg-rose-500/20 text-rose-400 border-rose-500/30"
+                  } border px-3 py-1`}
+                >
+                  {monitor.status === "up" ? "Online" : "Offline"}
+                </Badge>
+              )}
             </div>
           </div>
 

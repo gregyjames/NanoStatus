@@ -37,6 +37,7 @@ type Monitor struct {
 	IsThirdParty bool      `gorm:"default:false" json:"isThirdParty,omitempty"`
 	Icon         string    `json:"icon,omitempty"`
 	CheckInterval int      `gorm:"default:60" json:"checkInterval"` // Interval in seconds
+	Paused       bool      `gorm:"default:false" json:"paused"` // Whether monitoring is paused
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
@@ -158,8 +159,16 @@ func getStats() StatsResponse {
 	upCount := 0
 	downCount := 0
 	totalUptime := 0.0
+	unpausedCount := 0
 
 	for _, monitor := range monitors {
+		// Skip paused monitors from all calculations
+		if monitor.Paused {
+			continue
+		}
+		
+		unpausedCount++
+		
 		if monitor.Status == "up" {
 			upCount++
 		} else {
@@ -207,6 +216,10 @@ func getStats() StatsResponse {
 		totalResponseTime := 0
 		responseCount := 0
 		for _, monitor := range monitors {
+			// Skip paused monitors
+			if monitor.Paused {
+				continue
+			}
 			if monitor.ResponseTime > 0 {
 				totalResponseTime += monitor.ResponseTime
 				responseCount++
@@ -218,10 +231,10 @@ func getStats() StatsResponse {
 		}
 	}
 
-	// Calculate overall uptime as average of all monitors' historical uptime percentages
+	// Calculate overall uptime as average of all unpaused monitors' historical uptime percentages
 	overallUptime := 0.0
-	if len(monitors) > 0 {
-		overallUptime = totalUptime / float64(len(monitors))
+	if unpausedCount > 0 {
+		overallUptime = totalUptime / float64(unpausedCount)
 	}
 
 	return StatsResponse{
@@ -343,6 +356,11 @@ func checkAllServices() {
 	db.Find(&monitors)
 
 	for i := range monitors {
+		// Skip paused monitors
+		if monitors[i].Paused {
+			continue
+		}
+		
 		checkService(&monitors[i])
 		// Small delay between checks to avoid overwhelming servers
 		time.Sleep(500 * time.Millisecond)
@@ -361,6 +379,12 @@ func startChecker() {
 
 			for i := range monitors {
 				monitor := &monitors[i]
+				
+				// Skip paused monitors
+				if monitor.Paused {
+					continue
+				}
+				
 				interval := monitor.CheckInterval
 				if interval <= 0 {
 					interval = 60 // Default to 60 seconds
@@ -603,8 +627,34 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Read body once
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			log.Printf("[API] ERROR PUT /api/monitor?id=%s: Failed to read body: %v", id, err)
+			http.Error(w, "Failed to read request body", http.StatusBadRequest)
+			return
+		}
+
+		// Check if this is a pause/unpause request (has only "paused" field)
+		var pauseReq struct {
+			Paused *bool `json:"paused"`
+		}
+		if err := json.Unmarshal(bodyBytes, &pauseReq); err == nil && pauseReq.Paused != nil {
+			// This is a pause/unpause request
+			monitor.Paused = *pauseReq.Paused
+			if err := db.Save(&monitor).Error; err != nil {
+				log.Printf("[API] ERROR PUT /api/monitor?id=%s: Failed to update paused state: %v", id, err)
+				http.Error(w, "Failed to update paused state", http.StatusInternalServerError)
+				return
+			}
+			log.Printf("[API] PUT /api/monitor?id=%s: Updated paused state to %v", id, monitor.Paused)
+			json.NewEncoder(w).Encode(monitor)
+			return
+		}
+
+		// Regular update request
 		var req CreateMonitorRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := json.Unmarshal(bodyBytes, &req); err != nil {
 			log.Printf("[API] ERROR PUT /api/monitor?id=%s: Invalid request body: %v", id, err)
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return

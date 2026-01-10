@@ -183,6 +183,37 @@ export function App() {
     }
   };
 
+  const togglePause = async (monitorId: string | number, paused: boolean) => {
+    try {
+      const response = await fetch(`/api/monitor?id=${monitorId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ paused }),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        alert("Failed to update pause state: " + error);
+        return;
+      }
+
+      const updatedMonitor = await response.json();
+      
+      // Update selected monitor if it was the one being paused/resumed
+      if (selectedMonitor && String(selectedMonitor.id) === String(monitorId)) {
+        setSelectedMonitor(updatedMonitor);
+      }
+
+      fetchMonitors();
+      fetchStats();
+    } catch (error) {
+      console.error("Failed to toggle pause:", error);
+      alert("Failed to toggle pause. Please try again.");
+    }
+  };
+
   useEffect(() => {
     fetchMonitors();
     fetchStats();
@@ -259,6 +290,7 @@ export function App() {
                   responseTimeData={responseTimeData}
                   onDelete={deleteService}
                   onEdit={handleEdit}
+                  onTogglePause={togglePause}
                 />
               ) : (
                 <div className="rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl border border-slate-700/50 p-12 shadow-2xl shadow-black/30 flex items-center justify-center min-h-[400px]">
@@ -285,6 +317,7 @@ export function App() {
                     responseTimeData={responseTimeData}
                     onDelete={deleteService}
                     onEdit={handleEdit}
+                    onTogglePause={togglePause}
                   />
                 ) : (
                   <div className="rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl border border-slate-700/50 p-12 shadow-2xl shadow-black/30 flex items-center justify-center min-h-[400px]">

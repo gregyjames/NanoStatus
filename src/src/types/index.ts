@@ -9,6 +9,8 @@ export interface Monitor {
   isThirdParty?: boolean;
   icon?: string;
   checkInterval?: number;
+  paused?: boolean;
+  updatedAt?: string;
 }
 
 export interface Stats {
