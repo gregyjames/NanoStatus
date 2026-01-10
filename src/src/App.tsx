@@ -219,14 +219,71 @@ export function App() {
     fetchStats();
   }, [fetchMonitors, fetchStats]);
 
+  // Set up SSE connection for real-time updates
   useEffect(() => {
-    const interval = setInterval(() => {
-      fetchMonitors();
-      fetchStats();
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [fetchMonitors, fetchStats]);
+    const eventSource = new EventSource("/api/events");
+    
+    eventSource.onmessage = (event) => {
+      try {
+        const update = JSON.parse(event.data);
+        
+        switch (update.type) {
+          case "monitor_update":
+            // Update the specific monitor in the list
+            setMonitors((prev) => {
+              const updated = prev.map((m) => 
+                String(m.id) === String(update.data.id) ? update.data : m
+              );
+              // Update selected monitor if it's the one that changed
+              setSelectedMonitor((sel) => {
+                if (sel && String(sel.id) === String(update.data.id)) {
+                  return update.data;
+                }
+                return sel;
+              });
+              return updated;
+            });
+            setLastUpdate(new Date());
+            break;
+            
+          case "monitor_added":
+            // Add new monitor to the list
+            setMonitors((prev) => [...prev, update.data]);
+            setLastUpdate(new Date());
+            break;
+            
+          case "monitor_deleted":
+            // Remove monitor from the list
+            setMonitors((prev) => prev.filter((m) => String(m.id) !== String(update.data.id)));
+            setSelectedMonitor((sel) => {
+              if (sel && String(sel.id) === String(update.data.id)) {
+                return null;
+              }
+              return sel;
+            });
+            setLastUpdate(new Date());
+            break;
+            
+          case "stats_update":
+            // Update stats
+            setStats(update.data);
+            setLastUpdate(new Date());
+            break;
+        }
+      } catch (error) {
+        console.error("Error parsing SSE update:", error);
+      }
+    };
+    
+    eventSource.onerror = (error) => {
+      console.error("SSE connection error:", error);
+      // EventSource will automatically reconnect
+    };
+    
+    return () => {
+      eventSource.close();
+    };
+  }, []);
 
   useEffect(() => {
     if (selectedMonitor) {

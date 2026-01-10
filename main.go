@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/driver/sqlite"
@@ -25,6 +26,86 @@ import (
 var staticFiles embed.FS
 
 var db *gorm.DB
+
+// SSE broadcaster for real-time updates
+type SSEClient struct {
+	ID   string
+	Send chan []byte
+}
+
+type SSEBroadcaster struct {
+	clients   map[string]*SSEClient
+	mu        sync.RWMutex
+	broadcast chan []byte
+}
+
+var sseBroadcaster = &SSEBroadcaster{
+	clients:   make(map[string]*SSEClient),
+	broadcast: make(chan []byte, 256),
+}
+
+func (b *SSEBroadcaster) addClient(id string) *SSEClient {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	client := &SSEClient{
+		ID:   id,
+		Send: make(chan []byte, 256),
+	}
+	b.clients[id] = client
+	log.Printf("[SSE] Client connected: %s (total: %d)", id, len(b.clients))
+	return client
+}
+
+func (b *SSEBroadcaster) removeClient(id string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if client, ok := b.clients[id]; ok {
+		close(client.Send)
+		delete(b.clients, id)
+		log.Printf("[SSE] Client disconnected: %s (total: %d)", id, len(b.clients))
+	}
+}
+
+func (b *SSEBroadcaster) broadcastMessage(message []byte) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	
+	clientCount := len(b.clients)
+	if clientCount == 0 {
+		log.Printf("[SSE] No clients connected, dropping message (%d bytes)", len(message))
+		return
+	}
+	
+	sentCount := 0
+	droppedCount := 0
+	for id, client := range b.clients {
+		select {
+		case client.Send <- message:
+			sentCount++
+		default:
+			droppedCount++
+			log.Printf("[SSE] Client %s channel full, dropping message", id)
+		}
+	}
+	
+	log.Printf("[SSE] Broadcast: sent to %d/%d clients (%d bytes, %d dropped)", 
+		sentCount, clientCount, len(message), droppedCount)
+}
+
+func broadcastUpdate(updateType string, data interface{}) {
+	update := map[string]interface{}{
+		"type": updateType,
+		"data": data,
+	}
+	jsonData, err := json.Marshal(update)
+	if err != nil {
+		log.Printf("[SSE] ERROR: Failed to marshal %s update: %v", updateType, err)
+		return
+	}
+	
+	log.Printf("[SSE] Broadcasting %s update (%d bytes)", updateType, len(jsonData))
+	go sseBroadcaster.broadcastMessage(jsonData)
+}
 
 type Monitor struct {
 	ID           uint      `gorm:"primaryKey" json:"id"`
@@ -349,6 +430,13 @@ func checkService(monitor *Monitor) {
 	monitor.LastCheck = lastCheck
 	monitor.UpdatedAt = now
 	db.Save(monitor)
+
+	// Broadcast update via SSE
+	broadcastUpdate("monitor_update", monitor)
+	
+	// Also broadcast stats update
+	stats := getStats()
+	broadcastUpdate("stats_update", stats)
 }
 
 func checkAllServices() {
@@ -564,6 +652,71 @@ func apiResponseTime(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(data)
 }
 
+func apiSSE(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[SSE] New connection request from %s (User-Agent: %s)", r.RemoteAddr, r.UserAgent())
+	
+	// Set headers for SSE
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Cache-Control")
+
+	// Create client
+	clientID := fmt.Sprintf("%s-%d", r.RemoteAddr, time.Now().UnixNano())
+	client := sseBroadcaster.addClient(clientID)
+	defer func() {
+		sseBroadcaster.removeClient(clientID)
+		log.Printf("[SSE] Cleanup completed for client %s", clientID)
+	}()
+
+	// Send initial connection message
+	connectMsg := `{"type":"connected"}`
+	fmt.Fprintf(w, "data: %s\n\n", connectMsg)
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+		log.Printf("[SSE] Sent connection confirmation to client %s", clientID)
+	} else {
+		log.Printf("[SSE] WARNING: ResponseWriter does not support flushing for client %s", clientID)
+	}
+
+	// Keep connection alive and send updates
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	
+	messageCount := 0
+	keepaliveCount := 0
+	startTime := time.Now()
+
+	for {
+		select {
+		case message := <-client.Send:
+			messageCount++
+			fmt.Fprintf(w, "data: %s\n\n", string(message))
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+				log.Printf("[SSE] Sent message #%d to client %s (%d bytes)", 
+					messageCount, clientID, len(message))
+			} else {
+				log.Printf("[SSE] ERROR: Cannot flush message to client %s", clientID)
+			}
+		case <-ticker.C:
+			// Send keepalive
+			keepaliveCount++
+			fmt.Fprintf(w, ": keepalive\n\n")
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+				log.Printf("[SSE] Sent keepalive #%d to client %s", keepaliveCount, clientID)
+			}
+		case <-r.Context().Done():
+			duration := time.Since(startTime)
+			log.Printf("[SSE] Client %s disconnected after %v (sent %d messages, %d keepalives)", 
+				clientID, duration, messageCount, keepaliveCount)
+			return
+		}
+	}
+}
+
 func apiMonitor(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	log.Printf("[API] %s %s?id=%s", r.Method, r.URL.Path, id)
@@ -719,6 +872,14 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 		}
 
 		log.Printf("[API] DELETE /api/monitor?id=%s: Successfully deleted monitor name=%q", id, monitor.Name)
+		
+		// Broadcast deletion via SSE
+		broadcastUpdate("monitor_deleted", map[string]interface{}{"id": monitorID})
+		
+		// Broadcast stats update
+		stats := getStats()
+		broadcastUpdate("stats_update", stats)
+		
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -740,6 +901,7 @@ func main() {
 	http.HandleFunc("/api/stats", apiStats)
 	http.HandleFunc("/api/response-time", apiResponseTime)
 	http.HandleFunc("/api/monitor", apiMonitor)
+	http.HandleFunc("/api/events", apiSSE)
 
 	// Serve static files
 	staticFS, err := fs.Sub(staticFiles, "dist")
