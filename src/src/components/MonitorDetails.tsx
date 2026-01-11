@@ -130,192 +130,216 @@ export function MonitorDetails({ monitor, responseTimeData, onDelete, onEdit, on
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -20 }}
         transition={{ duration: 0.4 }}
-        className="space-y-6"
+        className="space-y-5"
       >
-        <div className={`rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl border p-8 shadow-2xl shadow-black/30 ${
-          isPaused ? "border-amber-500/30 bg-gradient-to-br from-amber-500/5 to-slate-900/50" : "border-slate-700/50"
+        <div className={`rounded-2xl glass-card border p-6 ${
+          isPaused ? "border-amber-500/20" : "border-white/10"
         }`}>
           {isPaused && (
-            <div className="mb-4 p-3 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center gap-2">
-              <Pause className="h-4 w-4 text-amber-400" />
-              <span className="text-sm font-semibold text-amber-400">Monitoring is paused</span>
-            </div>
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="mb-5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center gap-3"
+            >
+              <Pause className="h-5 w-5 text-amber-300" />
+              <span className="text-sm font-semibold text-amber-200">Monitoring is paused</span>
+            </motion.div>
           )}
-          <div className="flex items-center justify-between mb-8">
-            <div className="flex items-center gap-4">
+          <div className="flex items-start justify-between gap-6 mb-6">
+            <div className="flex items-start gap-4 min-w-0">
               {monitor.icon ? (
-                <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-blue-500/30 text-4xl">
+                <motion.div 
+                  className="h-12 w-12 rounded-xl bg-white/[0.06] border border-white/10 flex items-center justify-center text-2xl"
+                  whileHover={{ scale: 1.05 }}
+                >
                   {monitor.icon}
-                </div>
+                </motion.div>
               ) : (
-                <div className="p-4 rounded-2xl bg-slate-700/50 border border-slate-600/50">
-                  <Globe className="h-8 w-8 text-slate-400" />
+                <div className="h-12 w-12 rounded-xl bg-white/[0.04] border border-white/10 flex items-center justify-center">
+                  <Globe className="h-6 w-6 text-slate-200" />
                 </div>
               )}
-              <div>
-                <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent mb-1">
+              <div className="min-w-0">
+                <h2 className="text-2xl font-semibold text-white leading-snug truncate">
                   {monitor.name}
                 </h2>
-                <p className="text-slate-400 mb-2">{monitor.url}</p>
-                <div className="flex items-center gap-4 text-xs text-slate-500">
-                  <div className="flex items-center gap-1.5">
-                    <Clock className="h-3.5 w-3.5" />
+                <p className="text-sm text-slate-300/70 truncate">{monitor.url}</p>
+                <div className="flex flex-wrap items-center gap-3 mt-3 text-xs text-slate-300/70">
+                  <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-white/[0.04] border border-white/10">
+                    <Clock className="h-4 w-4 text-slate-300/70" />
                     <span>Last update: {secondsSinceUpdate === 0 ? "just now" : formatTimeAgo(secondsSinceUpdate)}</span>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <RefreshCw className="h-3.5 w-3.5" />
+                  <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-white/[0.04] border border-white/10">
+                    <RefreshCw className="h-4 w-4 text-slate-300/70" />
                     <span>Interval: {monitor.checkInterval || 60}s</span>
                   </div>
                 </div>
               </div>
             </div>
             <div className="flex gap-3">
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className={`border-slate-700/50 bg-slate-800/30 text-white hover:bg-slate-700/50 hover:text-white hover:border-slate-600/50 ${
-                  isPaused ? "border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20" : ""
-                }`}
-                onClick={() => onTogglePause(monitor.id, !isPaused)}
-              >
-                {isPaused ? (
-                  <>
-                    <Play className="h-4 w-4 mr-2" />
-                    Resume
-                  </>
-                ) : (
-                  <>
-                    <Pause className="h-4 w-4 mr-2" />
-                    Pause
-                  </>
-                )}
-              </Button>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="border-slate-700/50 bg-slate-800/30 text-white hover:bg-slate-700/50 hover:text-white hover:border-slate-600/50"
-                onClick={() => onEdit(monitor)}
-              >
-                <Edit className="h-4 w-4 mr-2" />
-                Edit
-              </Button>
-              <Button 
-                variant="destructive" 
-                size="sm"
-                className="bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white"
-                onClick={() => onDelete(monitor.id)}
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Delete
-              </Button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <div className="rounded-xl bg-slate-800/30 border border-slate-700/50 p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <Zap className="h-4 w-4 text-amber-400" />
-                <span className="text-xs font-semibold text-slate-400 uppercase">Current</span>
-              </div>
-              <p className="text-2xl font-bold text-white">
-                {monitor.status === "up" ? `${monitor.responseTime}ms` : "N/A"}
-              </p>
-            </div>
-            <div className="rounded-xl bg-slate-800/30 border border-slate-700/50 p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <TrendingUp className="h-4 w-4 text-blue-400" />
-                <span className="text-xs font-semibold text-slate-400 uppercase">Avg (24h)</span>
-              </div>
-              <p className="text-2xl font-bold text-white">
-                {avgResponseTime > 0 ? `${avgResponseTime}ms` : "N/A"}
-              </p>
-            </div>
-            <div className="rounded-xl bg-slate-800/30 border border-slate-700/50 p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <Activity className="h-4 w-4 text-emerald-400" />
-                <span className="text-xs font-semibold text-slate-400 uppercase">Uptime</span>
-              </div>
-              <p className="text-2xl font-bold text-white">
-                {monitor.uptime ? `${Math.round(monitor.uptime)}%` : "N/A"}
-              </p>
-            </div>
-            <div className="rounded-xl bg-slate-800/30 border border-slate-700/50 p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <AlertCircle className="h-4 w-4 text-primary" />
-                <span className="text-xs font-semibold text-slate-400 uppercase">Status</span>
-              </div>
-              {isPaused ? (
-                <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 border px-3 py-1">
-                  Paused
-                </Badge>
-              ) : (
-                <Badge
-                  className={`${
-                    monitor.status === "up"
-                      ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
-                      : "bg-rose-500/20 text-rose-400 border-rose-500/30"
-                  } border px-3 py-1`}
+              <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }}>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className={`h-9 px-3 rounded-lg border bg-white/[0.04] text-white border-white/10 hover:bg-white/[0.06] ${
+                    isPaused ? "border-amber-500/20" : ""
+                  }`}
+                  onClick={() => onTogglePause(monitor.id, !isPaused)}
                 >
-                  {monitor.status === "up" ? "Online" : "Offline"}
-                </Badge>
-              )}
+                  {isPaused ? (
+                    <>
+                      <Play className="h-4 w-4 mr-2" />
+                      Resume
+                    </>
+                  ) : (
+                    <>
+                      <Pause className="h-4 w-4 mr-2" />
+                      Pause
+                    </>
+                  )}
+                </Button>
+              </motion.div>
+              <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }}>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="h-9 px-3 rounded-lg border bg-white/[0.04] text-white border-white/10 hover:bg-white/[0.06]"
+                  onClick={() => onEdit(monitor)}
+                >
+                  <Edit className="h-4 w-4 mr-2" />
+                  Edit
+                </Button>
+              </motion.div>
+              <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }}>
+                <Button 
+                  variant="destructive" 
+                  size="sm"
+                  className="h-9 px-3 rounded-lg"
+                  onClick={() => onDelete(monitor.id)}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete
+                </Button>
+              </motion.div>
             </div>
           </div>
 
-          <div className="rounded-xl bg-slate-800/30 border border-slate-700/50 p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-3">
-                <BarChart3 className="h-5 w-5 text-blue-400" />
-                <h3 className="text-lg font-bold text-white">Response Time History</h3>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+            <div className="rounded-xl bg-white/[0.04] border border-white/10 p-4">
+              <div className="flex items-center gap-2 text-[11px] text-slate-300/60 uppercase tracking-wider">
+                <Zap className="h-4 w-4 text-slate-300/70" />
+                Current
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-white tabular-nums">
+                {monitor.status === "up" ? `${monitor.responseTime}ms` : "—"}
+              </div>
+            </div>
+            <div className="rounded-xl bg-white/[0.04] border border-white/10 p-4">
+              <div className="flex items-center gap-2 text-[11px] text-slate-300/60 uppercase tracking-wider">
+                <TrendingUp className="h-4 w-4 text-slate-300/70" />
+                Avg (24h)
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-white tabular-nums">
+                {avgResponseTime > 0 ? `${avgResponseTime}ms` : "—"}
+              </div>
+            </div>
+            <div className="rounded-xl bg-white/[0.04] border border-white/10 p-4">
+              <div className="flex items-center gap-2 text-[11px] text-slate-300/60 uppercase tracking-wider">
+                <Activity className="h-4 w-4 text-slate-300/70" />
+                Uptime
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-white tabular-nums">
+                {monitor.uptime ? `${Math.round(monitor.uptime)}%` : "—"}
+              </div>
+            </div>
+            <div className="rounded-xl bg-white/[0.04] border border-white/10 p-4">
+              <div className="flex items-center gap-2 text-[11px] text-slate-300/60 uppercase tracking-wider">
+                <AlertCircle className="h-4 w-4 text-slate-300/70" />
+                Status
+              </div>
+              <div className="mt-2">
+                {isPaused ? (
+                  <Badge className="bg-amber-500/10 text-amber-200 border-amber-500/20 border px-3 py-1">
+                    Paused
+                  </Badge>
+                ) : (
+                  <Badge
+                    className={`${
+                      monitor.status === "up"
+                        ? "bg-emerald-500/10 text-emerald-200 border-emerald-500/20"
+                        : "bg-rose-500/10 text-rose-200 border-rose-500/20"
+                    } border px-3 py-1`}
+                  >
+                    {monitor.status === "up" ? "Online" : "Offline"}
+                  </Badge>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl glass-card p-6 border border-white/10">
+            <div className="flex items-center justify-between mb-8">
+              <div className="flex items-center gap-4">
+                <div className="h-10 w-10 rounded-xl bg-white/[0.06] border border-white/10 flex items-center justify-center">
+                  <BarChart3 className="h-5 w-5 text-slate-200" />
+                </div>
+                <h3 className="text-lg font-semibold text-white">Response time</h3>
               </div>
               <div className="flex items-center gap-2">
                 {(["1h", "12h", "1w", "1y"] as const).map((range) => (
-                  <Button
-                    key={range}
-                    variant={timeRange === range ? "default" : "outline"}
-                    size="sm"
-                    className={`text-xs px-3 h-7 transition-all ${
-                      timeRange === range
-                        ? "bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white shadow-lg shadow-blue-500/25"
-                        : "border-slate-700/50 bg-slate-800/30 text-white hover:bg-slate-700/50 hover:border-slate-600/50"
-                    }`}
-                    onClick={() => {
-                      setTimeRange(range);
-                      if (onFetchResponseTime) {
-                        onFetchResponseTime(String(monitor.id), range);
-                      }
-                    }}
-                  >
-                    {range === "1h" ? "1 Hour" : range === "12h" ? "12 Hours" : range === "1w" ? "1 Week" : "1 Year"}
-                  </Button>
+                  <motion.div key={range} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }}>
+                    <Button
+                      variant={timeRange === range ? "default" : "outline"}
+                      size="sm"
+                      className={`text-xs px-3 h-8 font-semibold transition-all rounded-lg ${
+                        timeRange === range
+                          ? "bg-white text-slate-900 hover:bg-white/90"
+                          : "bg-white/[0.04] text-white border border-white/10 hover:bg-white/[0.06]"
+                      }`}
+                      onClick={() => {
+                        setTimeRange(range);
+                        if (onFetchResponseTime) {
+                          onFetchResponseTime(String(monitor.id), range);
+                        }
+                      }}
+                    >
+                      {range === "1h" ? "1 Hour" : range === "12h" ? "12 Hours" : range === "1w" ? "1 Week" : "1 Year"}
+                    </Button>
+                  </motion.div>
                 ))}
               </div>
             </div>
-            <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height={400}>
               <AreaChart data={formattedResponseTimeData}>
                 <defs>
                   <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0}/>
+                    <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.5}/>
+                    <stop offset="50%" stopColor="#3b82f6" stopOpacity={0.4}/>
+                    <stop offset="100%" stopColor="#ec4899" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.3} />
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" opacity={0.3} />
                 <XAxis 
                   dataKey="time" 
-                  tick={{ fill: "#94a3b8", fontSize: 12 }}
-                  stroke="#475569"
+                  tick={{ fill: "#e2e8f0", fontSize: 12, fontWeight: 600 }}
+                  stroke="rgba(255,255,255,0.1)"
+                  style={{ fontFamily: 'system-ui' }}
                 />
                 <YAxis 
-                  tick={{ fill: "#94a3b8", fontSize: 12 }}
-                  stroke="#475569"
+                  tick={{ fill: "#e2e8f0", fontSize: 12, fontWeight: 600 }}
+                  stroke="rgba(255,255,255,0.1)"
                   domain={[0, 1200]}
+                  style={{ fontFamily: 'system-ui' }}
                 />
                 <Tooltip 
                   contentStyle={{ 
-                    backgroundColor: "#1e293b",
-                    border: "1px solid #334155",
-                    borderRadius: "8px",
-                    color: "#f1f5f9"
+                    backgroundColor: "rgba(10, 10, 20, 0.95)",
+                    backdropFilter: "blur(24px)",
+                    border: "2px solid rgba(255,255,255,0.15)",
+                    borderRadius: "16px",
+                    color: "#f1f5f9",
+                    boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+                    padding: "12px 16px"
                   }}
                   formatter={(value: number | undefined) => [
                     value !== undefined ? `${value.toFixed(2)} ms` : "N/A",
@@ -325,7 +349,7 @@ export function MonitorDetails({ monitor, responseTimeData, onDelete, onEdit, on
                 <Area 
                   type="monotone" 
                   dataKey="responseTime" 
-                  stroke="#22c55e"
+                  stroke="#8b5cf6"
                   strokeWidth={2}
                   fill="url(#colorGradient)"
                 />

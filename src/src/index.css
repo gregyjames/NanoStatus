@@ -7,8 +7,14 @@
 
   body {
     @apply min-w-[320px] min-h-screen relative m-0;
-    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+    background:
+      radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.18) 0%, transparent 45%),
+      radial-gradient(circle at 80% 0%, rgba(168, 85, 247, 0.14) 0%, transparent 55%),
+      radial-gradient(circle at 60% 85%, rgba(16, 185, 129, 0.10) 0%, transparent 45%),
+      linear-gradient(180deg, #070A12 0%, #0B1020 35%, #070A12 100%);
     background-attachment: fixed;
+    background-size: 100% 100%;
+    position: relative;
   }
 }
 
@@ -59,6 +65,96 @@
   100% {
     background-position: 1000px 0;
   }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes glow {
+  0%, 100% {
+    opacity: 0.5;
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 30px rgba(59, 130, 246, 0.6);
+  }
+}
+
+@keyframes gradient-shift {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-glow {
+  animation: glow 3s ease-in-out infinite;
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, #E2E8F0 0%, #93C5FD 45%, #E2E8F0 100%);
+  background-size: 180% 180%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: gradient-shift 10s ease infinite;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.neon-glow {
+  box-shadow:
+    0 10px 30px rgba(2, 6, 23, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.card-hover {
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background-color 160ms ease;
+}
+
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 16px 44px rgba(2, 6, 23, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.glass-effect {
+  background: rgba(7, 10, 18, 0.72);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow:
+    0 10px 30px rgba(2, 6, 23, 0.55);
+}
+
+.glass-card {
+  background: rgba(15, 23, 42, 0.38);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 14px 40px rgba(2, 6, 23, 0.50),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  position: relative;
+  overflow: hidden;
+}
+
+.glass-card::before {
+  content: none;
 }
 
 .animate-fade-in {

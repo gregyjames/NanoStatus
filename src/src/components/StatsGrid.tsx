@@ -34,81 +34,89 @@ export function StatsGrid({ stats }: StatsGridProps) {
       variants={containerVariants}
       initial="hidden"
       animate="visible"
-      className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
+      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6"
     >
       <motion.div
         variants={itemVariants}
-        whileHover={{ scale: 1.02, y: -4 }}
-        className="relative group overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl border border-slate-700/50 p-6 shadow-xl shadow-black/20"
+        whileHover={{ y: -2 }}
+        className="relative group overflow-hidden rounded-2xl glass-card p-5 card-hover"
       >
-        <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
         <div className="relative z-10">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-3 rounded-xl bg-blue-500/20 border border-blue-500/30">
-              <Activity className="h-5 w-5 text-blue-400" />
-            </div>
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Uptime</span>
+          <div className="flex items-center justify-between mb-3">
+            <motion.div 
+              className="p-2.5 rounded-xl bg-white/[0.06] border border-white/10"
+              whileHover={{ scale: 1.03 }}
+            >
+              <Activity className="h-5 w-5 text-slate-200" />
+            </motion.div>
+            <span className="text-[11px] font-semibold text-slate-200/70 uppercase tracking-wider">Uptime</span>
           </div>
-          <p className="text-4xl font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent mb-1">
-            {stats ? Math.round(stats.overallUptime) : 0}%
-          </p>
-          <p className="text-sm text-slate-400">Overall system health</p>
+          <div className="flex items-end justify-between gap-4">
+            <div className="text-3xl font-semibold text-white tabular-nums">
+              {stats ? Math.round(stats.overallUptime) : 0}%
+            </div>
+            <div className="text-xs text-slate-300/60">last 24h</div>
+          </div>
         </div>
       </motion.div>
 
       <motion.div
         variants={itemVariants}
-        whileHover={{ scale: 1.02, y: -4 }}
-        className="relative group overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl border border-slate-700/50 p-6 shadow-xl shadow-black/20"
+        whileHover={{ y: -2 }}
+        className="relative group overflow-hidden rounded-2xl glass-card p-5 card-hover"
       >
-        <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
         <div className="relative z-10">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-3 rounded-xl bg-emerald-500/20 border border-emerald-500/30">
-              <CheckCircle2 className="h-5 w-5 text-emerald-400" />
-            </div>
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Online</span>
+          <div className="flex items-center justify-between mb-3">
+            <motion.div 
+              className="p-2.5 rounded-xl bg-white/[0.06] border border-white/10"
+              whileHover={{ scale: 1.03 }}
+            >
+              <CheckCircle2 className="h-5 w-5 text-emerald-300" />
+            </motion.div>
+            <span className="text-[11px] font-semibold text-slate-200/70 uppercase tracking-wider">Online</span>
           </div>
-          <p className="text-4xl font-bold text-emerald-400 mb-1">{stats?.servicesUp || 0}</p>
-          <p className="text-sm text-slate-400">Services online</p>
+          <div className="text-3xl font-semibold text-white tabular-nums">{stats?.servicesUp || 0}</div>
+          <div className="text-xs text-slate-300/60 mt-1">monitors</div>
         </div>
       </motion.div>
 
       <motion.div
         variants={itemVariants}
-        whileHover={{ scale: 1.02, y: -4 }}
-        className="relative group overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl border border-slate-700/50 p-6 shadow-xl shadow-black/20"
+        whileHover={{ y: -2 }}
+        className="relative group overflow-hidden rounded-2xl glass-card p-5 card-hover"
       >
-        <div className="absolute inset-0 bg-gradient-to-br from-rose-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
         <div className="relative z-10">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-3 rounded-xl bg-rose-500/20 border border-rose-500/30">
-              <XCircle className="h-5 w-5 text-rose-400" />
-            </div>
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Offline</span>
+          <div className="flex items-center justify-between mb-3">
+            <motion.div 
+              className="p-2.5 rounded-xl bg-white/[0.06] border border-white/10"
+              whileHover={{ scale: 1.03 }}
+            >
+              <XCircle className="h-5 w-5 text-rose-300" />
+            </motion.div>
+            <span className="text-[11px] font-semibold text-slate-200/70 uppercase tracking-wider">Offline</span>
           </div>
-          <p className="text-4xl font-bold text-rose-400 mb-1">{stats?.servicesDown || 0}</p>
-          <p className="text-sm text-slate-400">Services down</p>
+          <div className="text-3xl font-semibold text-white tabular-nums">{stats?.servicesDown || 0}</div>
+          <div className="text-xs text-slate-300/60 mt-1">monitors</div>
         </div>
       </motion.div>
 
       <motion.div
         variants={itemVariants}
-        whileHover={{ scale: 1.02, y: -4 }}
-        className="relative group overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl border border-slate-700/50 p-6 shadow-xl shadow-black/20"
+        whileHover={{ y: -2 }}
+        className="relative group overflow-hidden rounded-2xl glass-card p-5 card-hover"
       >
-        <div className="absolute inset-0 bg-gradient-to-br from-amber-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
         <div className="relative z-10">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-3 rounded-xl bg-amber-500/20 border border-amber-500/30">
-              <Gauge className="h-5 w-5 text-amber-400" />
-            </div>
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Response</span>
+          <div className="flex items-center justify-between mb-3">
+            <motion.div 
+              className="p-2.5 rounded-xl bg-white/[0.06] border border-white/10"
+              whileHover={{ scale: 1.03 }}
+            >
+              <Gauge className="h-5 w-5 text-amber-300" />
+            </motion.div>
+            <span className="text-[11px] font-semibold text-slate-200/70 uppercase tracking-wider">Avg latency</span>
           </div>
-          <p className="text-4xl font-bold bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent mb-1">
-            {stats?.avgResponseTime || 0}ms
-          </p>
-          <p className="text-sm text-slate-400">Average latency</p>
+          <div className="text-3xl font-semibold text-white tabular-nums">{stats?.avgResponseTime || 0}ms</div>
+          <div className="text-xs text-slate-300/60 mt-1">last 24h</div>
         </div>
       </motion.div>
     </motion.div>

@@ -321,7 +321,7 @@ export function App() {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
+    <div className="min-h-screen text-white relative z-10">
       <Header
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -330,7 +330,7 @@ export function App() {
         lastUpdate={lastUpdate}
       />
 
-      <div className="container mx-auto px-6 py-8">
+      <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-12 relative z-10">
         {loading ? (
           <div className="flex items-center justify-center min-h-[60vh]">
             <motion.div
@@ -347,45 +347,44 @@ export function App() {
             className="space-y-8"
           >
             <StatsGrid stats={stats} />
-            {/* Mobile/Tablet: Stack services and details */}
-            <div className="lg:hidden space-y-6">
-              {selectedMonitor ? (
-                <>
-                  <ServicesGrid
-                    monitors={filteredMonitors}
-                    selectedMonitor={selectedMonitor}
-                    onSelectMonitor={setSelectedMonitor}
-                  />
-                  <MonitorDetails
-                    monitor={selectedMonitor}
-                    responseTimeData={responseTimeData}
-                    onDelete={deleteService}
-                    onEdit={handleEdit}
-                    onTogglePause={togglePause}
-                    onFetchResponseTime={fetchResponseTimeData}
-                  />
-                </>
-              ) : (
-                <div>
-                  <h2 className="text-lg font-bold text-white mb-4">Services</h2>
-                  <ServicesGrid
-                    monitors={filteredMonitors}
-                    selectedMonitor={selectedMonitor}
-                    onSelectMonitor={setSelectedMonitor}
-                  />
-                </div>
-              )}
-            </div>
-            {/* Desktop: Side-by-side layout */}
-            <div className="hidden lg:grid lg:grid-cols-4 gap-6">
-              <div className="lg:col-span-1">
+            {/* Mobile/Tablet: List + details */}
+            <div className="lg:hidden grid gap-6">
+              <div className="glass-card rounded-2xl border border-white/10 p-4">
                 <ServicesGrid
                   monitors={filteredMonitors}
                   selectedMonitor={selectedMonitor}
                   onSelectMonitor={setSelectedMonitor}
                 />
               </div>
-              <div className="lg:col-span-3">
+              {selectedMonitor ? (
+                <MonitorDetails
+                  monitor={selectedMonitor}
+                  responseTimeData={responseTimeData}
+                  onDelete={deleteService}
+                  onEdit={handleEdit}
+                  onTogglePause={togglePause}
+                  onFetchResponseTime={fetchResponseTimeData}
+                />
+              ) : (
+                <div className="glass-card rounded-2xl border border-white/10 p-10 text-center">
+                  <p className="text-base text-slate-200 font-semibold">Select a monitor</p>
+                  <p className="text-sm text-slate-300/60 mt-1">Pick one from the list to see history and metrics.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Desktop: Sidebar list + main details */}
+            <div className="hidden lg:grid lg:grid-cols-12 gap-6">
+              <aside className="lg:col-span-4 xl:col-span-4">
+                <div className="glass-card rounded-2xl border border-white/10 p-4">
+                  <ServicesGrid
+                    monitors={filteredMonitors}
+                    selectedMonitor={selectedMonitor}
+                    onSelectMonitor={setSelectedMonitor}
+                  />
+                </div>
+              </aside>
+              <main className="lg:col-span-8 xl:col-span-8">
                 {selectedMonitor ? (
                   <MonitorDetails
                     monitor={selectedMonitor}
@@ -396,14 +395,16 @@ export function App() {
                     onFetchResponseTime={fetchResponseTimeData}
                   />
                 ) : (
-                  <div className="rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl border border-slate-700/50 p-12 shadow-2xl shadow-black/30 flex items-center justify-center min-h-[400px]">
-                    <div className="text-center">
-                      <p className="text-xl text-slate-400 mb-2">Select a service to view details</p>
-                      <p className="text-sm text-slate-500">Choose a service from the list on the left</p>
+                  <div className="glass-card rounded-2xl border border-white/10 p-12 min-h-[420px] flex items-center justify-center">
+                    <div className="text-center max-w-md">
+                      <p className="text-lg font-semibold text-slate-100">No monitor selected</p>
+                      <p className="text-sm text-slate-300/60 mt-2">
+                        Choose a monitor from the left to view uptime, latency trends, and configuration.
+                      </p>
                     </div>
                   </div>
                 )}
-              </div>
+              </main>
             </div>
           </motion.div>
         )}
