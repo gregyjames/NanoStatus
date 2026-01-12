@@ -3,6 +3,7 @@ package main
 import (
 	"time"
 
+	"github.com/go-co-op/gocron/v2"
 	"github.com/rs/zerolog/log"
 )
 
@@ -158,30 +159,36 @@ func bucketOldCheckHistory() {
 	log.Info().Int("buckets_created", totalBucketed).Msg("[Bucketing] Completed check history bucketing")
 }
 
-// startCleanupScheduler starts a background job that runs cleanup daily at midnight
+var cleanupScheduler gocron.Scheduler
+
+// startCleanupScheduler starts a background job that runs cleanup daily at midnight using gocron
 func startCleanupScheduler() {
-	// Calculate time until next midnight
-	now := time.Now()
-	nextMidnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
-	durationUntilMidnight := nextMidnight.Sub(now)
+	// Create a new scheduler for cleanup jobs
+	sched, err := gocron.NewScheduler()
+	if err != nil {
+		log.Fatal().Err(err).Msg("[Cleanup] Failed to create cleanup scheduler")
+	}
 	
-	log.Info().Time("next_cleanup", nextMidnight).Dur("duration", durationUntilMidnight).
-		Msg("[Cleanup] Cleanup scheduler started")
+	cleanupScheduler = sched
 	
-	// Wait until midnight
-	time.Sleep(durationUntilMidnight)
-	
-	// Run cleanup and bucketing immediately at midnight
-	cleanOldCheckHistory()
-	bucketOldCheckHistory()
-	
-	// Then run cleanup and bucketing every 24 hours
-	ticker := time.NewTicker(24 * time.Hour)
-	go func() {
-		for range ticker.C {
+	// Schedule cleanup job to run daily at midnight (00:00)
+	// Cron expression: "0 0 * * *" means: minute=0, hour=0, every day, every month, every weekday
+	_, err = cleanupScheduler.NewJob(
+		gocron.CronJob("0 0 * * *", false),
+		gocron.NewTask(func() {
+			log.Info().Msg("[Cleanup] Running scheduled cleanup and bucketing")
 			cleanOldCheckHistory()
 			bucketOldCheckHistory()
-		}
-	}()
+		}),
+		gocron.WithName("daily-cleanup"),
+	)
+	
+	if err != nil {
+		log.Fatal().Err(err).Msg("[Cleanup] Failed to schedule cleanup job")
+	}
+	
+	// Start the scheduler
+	cleanupScheduler.Start()
+	log.Info().Msg("[Cleanup] Cleanup scheduler started - will run daily at midnight")
 }
 
