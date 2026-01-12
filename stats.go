@@ -6,33 +6,30 @@ import (
 	"time"
 )
 
-// getStats calculates overall statistics from all monitors
+// getStats calculates overall statistics from all monitors using database aggregation
 func getStats() StatsResponse {
-	var monitors []Monitor
-	db.Find(&monitors)
-
-	upCount := 0
-	downCount := 0
-	totalUptime := 0.0
-	unpausedCount := 0
-
-	for _, monitor := range monitors {
-		// Skip paused monitors from all calculations
-		if monitor.Paused {
-			continue
-		}
-		
-		unpausedCount++
-		
-		if monitor.Status == "up" {
-			upCount++
-		} else {
-			downCount++
-		}
-		
-		// Sum up all monitors' uptime percentages (calculated from 24h history)
-		totalUptime += monitor.Uptime
+	// Use database aggregation to calculate stats without loading all monitors
+	var stats struct {
+		UnpausedCount int64
+		UpCount       int64
+		DownCount     int64
+		TotalUptime   float64
 	}
+	
+	db.Model(&Monitor{}).
+		Select(`
+			COUNT(*) as unpaused_count,
+			SUM(CASE WHEN status = 'up' THEN 1 ELSE 0 END) as up_count,
+			SUM(CASE WHEN status = 'down' THEN 1 ELSE 0 END) as down_count,
+			SUM(uptime) as total_uptime
+		`).
+		Where("paused = ?", false).
+		Scan(&stats)
+	
+	upCount := int(stats.UpCount)
+	downCount := int(stats.DownCount)
+	unpausedCount := int(stats.UnpausedCount)
+	totalUptime := stats.TotalUptime
 
 	// Calculate average response time from all check history in last 24 hours
 	// This gives a more accurate average across all checks, not just the last check per monitor
@@ -68,21 +65,22 @@ func getStats() StatsResponse {
 	
 	// Fallback: calculate from current monitor response times if no history or query failed
 	if countResult == 0 || avgResponseTime == 0 {
-		totalResponseTime := 0
-		responseCount := 0
-		for _, monitor := range monitors {
-			// Skip paused monitors
-			if monitor.Paused {
-				continue
-			}
-			if monitor.ResponseTime > 0 && monitor.Status == "up" {
-				totalResponseTime += monitor.ResponseTime
-				responseCount++
-			}
+		var fallbackStats struct {
+			TotalResponseTime int64
+			ResponseCount      int64
 		}
-		if responseCount > 0 {
-			avgResponseTime = totalResponseTime / responseCount
-			log.Printf("[Stats] Using fallback: avg response time from %d monitors: %dms", responseCount, avgResponseTime)
+		
+		db.Model(&Monitor{}).
+			Select(`
+				SUM(response_time) as total_response_time,
+				COUNT(*) as response_count
+			`).
+			Where("paused = ? AND response_time > 0 AND status = ?", false, "up").
+			Scan(&fallbackStats)
+		
+		if fallbackStats.ResponseCount > 0 {
+			avgResponseTime = int(fallbackStats.TotalResponseTime / fallbackStats.ResponseCount)
+			log.Printf("[Stats] Using fallback: avg response time from %d monitors: %dms", fallbackStats.ResponseCount, avgResponseTime)
 		}
 	}
 

@@ -8,13 +8,13 @@ type Monitor struct {
 	Name         string    `gorm:"not null" json:"name"`
 	URL          string    `gorm:"not null" json:"url"`
 	Uptime       float64   `gorm:"default:0" json:"uptime"`
-	Status       string    `gorm:"default:unknown" json:"status"`
+	Status       string    `gorm:"default:unknown;index:idx_paused_status" json:"status"`
 	ResponseTime int       `gorm:"default:0" json:"responseTime"`
 	LastCheck    string    `gorm:"default:never" json:"lastCheck"`
 	IsThirdParty bool      `gorm:"default:false" json:"isThirdParty,omitempty"`
 	Icon         string    `json:"icon,omitempty"`
 	CheckInterval int      `gorm:"default:60" json:"checkInterval"` // Interval in seconds
-	Paused       bool      `gorm:"default:false" json:"paused"` // Whether monitoring is paused
+	Paused       bool      `gorm:"default:false;index:idx_paused_status" json:"paused"` // Whether monitoring is paused
 	ConfigHash   string    `gorm:"index" json:"configHash,omitempty"` // Hash of YAML config (empty if created via UI/API)
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
@@ -40,10 +40,10 @@ type StatsResponse struct {
 // CheckHistory stores historical check data
 type CheckHistory struct {
 	ID           uint      `gorm:"primaryKey"`
-	MonitorID    uint      `gorm:"not null;index"`
-	Status       string    `gorm:"not null"`
-	ResponseTime int       `gorm:"default:0"`
-	CreatedAt    time.Time `gorm:"index"`
+	MonitorID    uint      `gorm:"not null;index:idx_monitor_created;index:idx_monitor_created_status"`
+	Status       string    `gorm:"not null;index:idx_monitor_created_status"`
+	ResponseTime int       `gorm:"default:0;index:idx_response_time_status"`
+	CreatedAt    time.Time `gorm:"index:idx_monitor_created;index:idx_monitor_created_status;index:idx_created_response"`
 }
 
 // ResponseTimeData represents formatted response time data for charts

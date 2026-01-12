@@ -2,7 +2,6 @@ package main
 
 import (
 	"embed"
-	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -58,30 +57,19 @@ func main() {
 			path = "index.html"
 		}
 
+		// Try to open the file - if it exists, serve it directly
 		file, err := staticFS.Open(path)
 		if err == nil {
+			// File exists, let FileServer handle it (will close the file)
 			file.Close()
 			fileServer.ServeHTTP(w, r)
 			return
 		}
 
-		// If file doesn't exist, serve index.html for SPA routing
-		index, err := staticFS.Open("index.html")
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		defer index.Close()
-
-		// Read the file content
-		content, err := io.ReadAll(index)
-		if err != nil {
-			http.Error(w, "Error reading index.html", http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "text/html")
-		w.Write(content)
+		// File doesn't exist, serve index.html for SPA routing
+		// Use FileServer to serve index.html efficiently
+		r.URL.Path = "/index.html"
+		fileServer.ServeHTTP(w, r)
 	})
 
 	port := ":8080"

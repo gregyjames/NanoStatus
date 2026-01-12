@@ -3,17 +3,53 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
+// Shared HTTP client with connection pooling for health checks
+var httpClient *http.Client
+
+// MonitorScheduler manages per-monitor tickers for efficient scheduling
+type MonitorScheduler struct {
+	tickers map[uint]*time.Ticker
+	stopCh  map[uint]chan struct{}
+	mu      sync.RWMutex
+}
+
+var monitorScheduler = &MonitorScheduler{
+	tickers: make(map[uint]*time.Ticker),
+	stopCh:  make(map[uint]chan struct{}),
+}
+
+func init() {
+	// Create optimized HTTP transport with connection pooling
+	transport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	// Create shared HTTP client
+	httpClient = &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: transport,
+	}
+}
+
 // checkService performs a health check on a single monitor
 func checkService(monitor *Monitor) {
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
 
 	start := time.Now()
 	var status string
@@ -49,7 +85,7 @@ func checkService(monitor *Monitor) {
     		req.Header.Set("Pragma", "no-cache")
     		req.Header.Set("Expires", "0")
 			//req.URL.RawQuery = fmt.Sprintf("_t=%d", time.Now().UnixNano())
-			resp, err := client.Do(req)
+			resp, err := httpClient.Do(req)
 			elapsed := time.Since(start)
 			responseTime = int(elapsed.Milliseconds())
 
@@ -96,18 +132,20 @@ func checkService(monitor *Monitor) {
 		}
 	}
 
-	// Calculate uptime from last 24 hours of checks
-	var upCount, totalCount int64
+	// Calculate uptime from last 24 hours of checks using a single query
 	twentyFourHoursAgo := now.Add(-24 * time.Hour)
-	db.Model(&CheckHistory{}).
-		Where("monitor_id = ? AND created_at > ?", monitor.ID, twentyFourHoursAgo).
-		Count(&totalCount)
+	var result struct {
+		TotalCount int64
+		UpCount    int64
+	}
 	
-	if totalCount > 0 {
-		db.Model(&CheckHistory{}).
-			Where("monitor_id = ? AND created_at > ? AND status = ?", monitor.ID, twentyFourHoursAgo, "up").
-			Count(&upCount)
-		monitor.Uptime = float64(upCount) / float64(totalCount) * 100
+	uptimeErr := db.Model(&CheckHistory{}).
+		Select("COUNT(*) as total_count, SUM(CASE WHEN status = 'up' THEN 1 ELSE 0 END) as up_count").
+		Where("monitor_id = ? AND created_at > ?", monitor.ID, twentyFourHoursAgo).
+		Scan(&result).Error
+	
+	if uptimeErr == nil && result.TotalCount > 0 {
+		monitor.Uptime = float64(result.UpCount) / float64(result.TotalCount) * 100
 	} else {
 		// If no checks in last 24h, use current status
 		if status == "up" {
@@ -148,43 +186,127 @@ func checkAllServices() {
 	}
 }
 
+// stopMonitorTicker stops the ticker for a specific monitor
+func (ms *MonitorScheduler) stopMonitorTicker(monitorID uint) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	
+	if ticker, exists := ms.tickers[monitorID]; exists {
+		ticker.Stop()
+		delete(ms.tickers, monitorID)
+	}
+	
+	if stopCh, exists := ms.stopCh[monitorID]; exists {
+		close(stopCh)
+		delete(ms.stopCh, monitorID)
+	}
+}
+
+// startMonitorTicker starts a ticker for a specific monitor
+func (ms *MonitorScheduler) startMonitorTicker(monitor *Monitor) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	
+	// Stop existing ticker if any
+	if ticker, exists := ms.tickers[monitor.ID]; exists {
+		ticker.Stop()
+	}
+	if stopCh, exists := ms.stopCh[monitor.ID]; exists {
+		close(stopCh)
+	}
+	
+	// Skip paused monitors
+	if monitor.Paused {
+		return
+	}
+	
+	interval := monitor.CheckInterval
+	if interval <= 0 {
+		interval = 60 // Default to 60 seconds
+	}
+	
+	// Create ticker and stop channel
+	ticker := time.NewTicker(time.Duration(interval) * time.Second)
+	stopCh := make(chan struct{})
+	
+	ms.tickers[monitor.ID] = ticker
+	ms.stopCh[monitor.ID] = stopCh
+	
+	// Start goroutine for this monitor
+	go func(m *Monitor, t *time.Ticker, stop chan struct{}) {
+		// Check immediately
+		go checkService(m)
+		
+		for {
+			select {
+			case <-t.C:
+				go checkService(m)
+			case <-stop:
+				return
+			}
+		}
+	}(monitor, ticker, stopCh)
+}
+
+// refreshScheduler reloads all monitors and updates tickers
+func (ms *MonitorScheduler) refreshScheduler() {
+	var monitors []Monitor
+	db.Find(&monitors)
+	
+	ms.mu.Lock()
+	activeIDs := make(map[uint]bool)
+	
+	// Start/update tickers for all active monitors
+	for i := range monitors {
+		monitor := &monitors[i]
+		activeIDs[monitor.ID] = true
+		
+		// Check if ticker exists
+		if _, exists := ms.tickers[monitor.ID]; exists {
+			// If paused, stop the ticker; otherwise keep it running
+			// (interval changes will be handled on next refresh)
+			if monitor.Paused {
+				ms.mu.Unlock()
+				ms.stopMonitorTicker(monitor.ID)
+				ms.mu.Lock()
+			}
+		} else {
+			// New monitor or was paused - start ticker if not paused
+			if !monitor.Paused {
+				ms.mu.Unlock()
+				ms.startMonitorTicker(monitor)
+				ms.mu.Lock()
+			}
+		}
+	}
+	
+	// Stop tickers for monitors that no longer exist
+	for monitorID := range ms.tickers {
+		if !activeIDs[monitorID] {
+			ms.mu.Unlock()
+			ms.stopMonitorTicker(monitorID)
+			ms.mu.Lock()
+		}
+	}
+	ms.mu.Unlock()
+}
+
 // startChecker starts the background service checker
 func startChecker() {
 	// Check immediately on startup
 	checkAllServices()
 
-	// Start individual checkers for each monitor based on their intervals
+	// Refresh scheduler periodically to pick up new/updated monitors
 	go func() {
-		for {
-			var monitors []Monitor
-			db.Find(&monitors)
-
-			for i := range monitors {
-				monitor := &monitors[i]
-				
-				// Skip paused monitors
-				if monitor.Paused {
-					continue
-				}
-				
-				interval := monitor.CheckInterval
-				if interval <= 0 {
-					interval = 60 // Default to 60 seconds
-				}
-
-				// Check if it's time to check this monitor
-				timeSinceLastCheck := time.Since(monitor.UpdatedAt)
-				intervalDuration := time.Duration(interval) * time.Second
-
-				if timeSinceLastCheck >= intervalDuration {
-					go checkService(monitor)
-					// Small delay between concurrent checks
-					time.Sleep(100 * time.Millisecond)
-				}
-			}
-
-			// Check every 10 seconds to see if any monitor needs checking
-			time.Sleep(10 * time.Second)
+		// Initial refresh
+		monitorScheduler.refreshScheduler()
+		
+		// Refresh every 30 seconds to pick up changes
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		
+		for range ticker.C {
+			monitorScheduler.refreshScheduler()
 		}
 	}()
 }

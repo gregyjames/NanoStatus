@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,11 +10,58 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
+
+// Compile regex once at package level for better performance
+var unicodePattern = regexp.MustCompile(`\\U([0-9A-Fa-f]{8})`)
+
+// setCORSHeaders sets common CORS headers
+func setCORSHeaders(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+}
+
+// setJSONHeaders sets common headers for JSON responses
+func setJSONHeaders(w http.ResponseWriter) {
+	setCORSHeaders(w)
+	w.Header().Set("Content-Type", "application/json")
+}
+
+// encodeJSONWithCompression encodes data as JSON with gzip compression if supported
+func encodeJSONWithCompression(w http.ResponseWriter, r *http.Request, data interface{}) error {
+	// Check if client accepts gzip
+	acceptsGzip := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
+
+	var buf bytes.Buffer
+
+	if acceptsGzip {
+		// Compress the JSON
+		gzw := gzip.NewWriter(&buf)
+		encoder := json.NewEncoder(gzw)
+		if err := encoder.Encode(data); err != nil {
+			gzw.Close()
+			return err
+		}
+		if err := gzw.Close(); err != nil {
+			return err
+		}
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Vary", "Accept-Encoding")
+	} else {
+		encoder := json.NewEncoder(&buf)
+		if err := encoder.Encode(data); err != nil {
+			return err
+		}
+	}
+
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", buf.Len()))
+	_, err := w.Write(buf.Bytes())
+	return err
+}
 
 // getResponseTimeData retrieves response time history for a monitor within a time range
 func getResponseTimeData(monitorID string, timeRange string) []ResponseTimeData {
@@ -102,8 +150,7 @@ func getResponseTimeData(monitorID string, timeRange string) []ResponseTimeData 
 func apiMonitors(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[API] %s %s", r.Method, r.URL.Path)
 	
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	setJSONHeaders(w)
 
 	if r.Method == http.MethodGet {
 		var monitors []Monitor
@@ -113,7 +160,9 @@ func apiMonitors(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Printf("[API] GET /api/monitors: returned %d monitors", len(monitors))
-		json.NewEncoder(w).Encode(monitors)
+		if err := encodeJSONWithCompression(w, r, monitors); err != nil {
+			log.Printf("[API] ERROR encoding monitors: %v", err)
+		}
 		return
 	}
 
@@ -125,8 +174,7 @@ func apiMonitors(w http.ResponseWriter, r *http.Request) {
 func apiCreateMonitor(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[API] %s %s", r.Method, r.URL.Path)
 	
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	setJSONHeaders(w)
 	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
@@ -191,15 +239,16 @@ func apiCreateMonitor(w http.ResponseWriter, r *http.Request) {
 	broadcastStatsIfChanged()
 
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(monitor)
+	if err := encodeJSONWithCompression(w, r, monitor); err != nil {
+		log.Printf("[API] ERROR encoding monitor: %v", err)
+	}
 }
 
 // apiStats handles GET requests to retrieve overall statistics
 func apiStats(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[API] %s %s", r.Method, r.URL.Path)
 	
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	setJSONHeaders(w)
 
 	if r.Method != http.MethodGet {
 		log.Printf("[API] ERROR %s /api/stats: Method not allowed", r.Method)
@@ -210,7 +259,9 @@ func apiStats(w http.ResponseWriter, r *http.Request) {
 	stats := getStats()
 	log.Printf("[API] GET /api/stats: overallUptime=%.2f%%, servicesUp=%d, servicesDown=%d, avgResponseTime=%dms", 
 		stats.OverallUptime, stats.ServicesUp, stats.ServicesDown, stats.AvgResponseTime)
-	json.NewEncoder(w).Encode(stats)
+	if err := encodeJSONWithCompression(w, r, stats); err != nil {
+		log.Printf("[API] ERROR encoding stats: %v", err)
+	}
 }
 
 // apiResponseTime handles GET requests to retrieve response time history
@@ -225,8 +276,7 @@ func apiResponseTime(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("[API] %s %s?id=%s&range=%s", r.Method, r.URL.Path, monitorID, timeRange)
 	
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	setJSONHeaders(w)
 
 	if r.Method != http.MethodGet {
 		log.Printf("[API] ERROR %s /api/response-time: Method not allowed", r.Method)
@@ -236,7 +286,9 @@ func apiResponseTime(w http.ResponseWriter, r *http.Request) {
 
 	data := getResponseTimeData(monitorID, timeRange)
 	log.Printf("[API] GET /api/response-time?id=%s&range=%s: returned %d data points", monitorID, timeRange, len(data))
-	json.NewEncoder(w).Encode(data)
+	if err := encodeJSONWithCompression(w, r, data); err != nil {
+		log.Printf("[API] ERROR encoding response time data: %v", err)
+	}
 }
 
 // apiSSE handles Server-Sent Events connections
@@ -310,7 +362,7 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	log.Printf("[API] %s %s?id=%s", r.Method, r.URL.Path, id)
 	
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	setCORSHeaders(w)
 	w.Header().Set("Access-Control-Allow-Methods", "GET, PUT, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
@@ -321,7 +373,7 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == http.MethodGet {
-		w.Header().Set("Content-Type", "application/json")
+		setJSONHeaders(w)
 		if id == "" {
 			log.Printf("[API] ERROR GET /api/monitor: Missing id parameter")
 			http.Error(w, "Missing id parameter", http.StatusBadRequest)
@@ -343,12 +395,14 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 		}
 
 		log.Printf("[API] GET /api/monitor?id=%s: returned monitor name=%q", id, monitor.Name)
-		json.NewEncoder(w).Encode(monitor)
+		if err := encodeJSONWithCompression(w, r, monitor); err != nil {
+			log.Printf("[API] ERROR encoding monitor: %v", err)
+		}
 		return
 	}
 
 	if r.Method == http.MethodPut {
-		w.Header().Set("Content-Type", "application/json")
+		setJSONHeaders(w)
 		if id == "" {
 			log.Printf("[API] ERROR PUT /api/monitor: Missing id parameter")
 			http.Error(w, "Missing id parameter", http.StatusBadRequest)
@@ -395,7 +449,9 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 			broadcastUpdate("monitor_update", monitor)
 			broadcastStatsIfChanged()
 			
-			json.NewEncoder(w).Encode(monitor)
+			if err := encodeJSONWithCompression(w, r, monitor); err != nil {
+				log.Printf("[API] ERROR encoding monitor: %v", err)
+			}
 			return
 		}
 
@@ -438,7 +494,9 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 		broadcastUpdate("monitor_update", monitor)
 		broadcastStatsIfChanged()
 		
-		json.NewEncoder(w).Encode(monitor)
+		if err := encodeJSONWithCompression(w, r, monitor); err != nil {
+			log.Printf("[API] ERROR encoding monitor: %v", err)
+		}
 		return
 	}
 
@@ -490,7 +548,7 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 func apiExportMonitors(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[API] %s %s", r.Method, r.URL.Path)
 
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	setCORSHeaders(w)
 
 	if r.Method != http.MethodGet {
 		log.Printf("[API] ERROR %s /api/monitors/export: Method not allowed", r.Method)
@@ -557,10 +615,6 @@ func apiExportMonitors(w http.ResponseWriter, r *http.Request) {
 
 // convertUnicodeEscapes converts YAML Unicode escape sequences like "\U0001F4BB" back to actual emojis
 func convertUnicodeEscapes(data []byte) []byte {
-	// Pattern to match \U followed by 8 hex digits (Unicode escape sequence)
-	// In YAML output, this appears as the literal string "\U0001F4BB"
-	unicodePattern := regexp.MustCompile(`\\U([0-9A-Fa-f]{8})`)
-	
 	result := unicodePattern.ReplaceAllFunc(data, func(match []byte) []byte {
 		// Extract the hex code (8 digits after \U)
 		// match is "\U0001F4BB", so we skip the first 2 bytes (\U) and take the next 8
