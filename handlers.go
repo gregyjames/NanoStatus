@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/mailru/easyjson"
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 )
@@ -32,6 +33,7 @@ func setJSONHeaders(w http.ResponseWriter) {
 }
 
 // encodeJSONWithCompression encodes data as JSON with gzip compression if supported
+// Uses easyjson when possible for maximum performance
 func encodeJSONWithCompression(w http.ResponseWriter, r *http.Request, data interface{}) error {
 	// Check if client accepts gzip
 	acceptsGzip := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
@@ -41,20 +43,41 @@ func encodeJSONWithCompression(w http.ResponseWriter, r *http.Request, data inte
 	if acceptsGzip {
 		// Compress the JSON
 		gzw := gzip.NewWriter(&buf)
-		encoder := json.NewEncoder(gzw)
-		if err := encoder.Encode(data); err != nil {
-			gzw.Close()
-			return err
+		
+		// Try to use easyjson for supported types
+		if marshaler, ok := data.(easyjson.Marshaler); ok {
+			_, err := easyjson.MarshalToWriter(marshaler, gzw)
+			if err != nil {
+				gzw.Close()
+				return err
+			}
+		} else {
+			// Fallback to standard json for unsupported types
+			encoder := json.NewEncoder(gzw)
+			if err := encoder.Encode(data); err != nil {
+				gzw.Close()
+				return err
+			}
 		}
+		
 		if err := gzw.Close(); err != nil {
 			return err
 		}
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Header().Set("Vary", "Accept-Encoding")
 	} else {
-		encoder := json.NewEncoder(&buf)
-		if err := encoder.Encode(data); err != nil {
-			return err
+		// Try to use easyjson for supported types
+		if marshaler, ok := data.(easyjson.Marshaler); ok {
+			_, err := easyjson.MarshalToWriter(marshaler, &buf)
+			if err != nil {
+				return err
+			}
+		} else {
+			// Fallback to standard json for unsupported types
+			encoder := json.NewEncoder(&buf)
+			if err := encoder.Encode(data); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -191,7 +214,13 @@ func apiCreateMonitor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req CreateMonitorRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Error().Err(err).Msg("[API] ERROR POST /api/monitors/create: Failed to read body")
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+	if err := easyjson.Unmarshal(bodyBytes, &req); err != nil {
 		log.Error().Err(err).Msg("[API] ERROR POST /api/monitors/create: Invalid request body")
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
@@ -230,6 +259,12 @@ func apiCreateMonitor(w http.ResponseWriter, r *http.Request) {
 	log.Info().Uint("id", monitor.ID).Str("name", monitor.Name).Str("url", monitor.URL).
 		Int("check_interval", monitor.CheckInterval).Msg("[API] POST /api/monitors/create: Created monitor")
 
+	// Trigger immediate scheduler refresh to start ticker for new monitor
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		monitorScheduler.refreshScheduler()
+	}()
+	
 	// Immediately check the new monitor
 	go checkService(&monitor)
 	
@@ -434,6 +469,7 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Check if this is a pause/unpause request (has only "paused" field)
+		// Use standard json for anonymous structs
 		var pauseReq struct {
 			Paused *bool `json:"paused"`
 		}
@@ -447,6 +483,12 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 			}
 			log.Info().Str("id", id).Bool("paused", monitor.Paused).Msg("[API] PUT /api/monitor: Updated paused state")
 			
+			// Trigger immediate scheduler refresh to pick up pause state changes
+			go func() {
+				time.Sleep(100 * time.Millisecond)
+				monitorScheduler.refreshScheduler()
+			}()
+			
 			// Broadcast update via SSE
 			broadcastUpdate("monitor_update", monitor)
 			broadcastStatsIfChanged()
@@ -459,7 +501,7 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 
 		// Regular update request
 		var req CreateMonitorRequest
-		if err := json.Unmarshal(bodyBytes, &req); err != nil {
+		if err := easyjson.Unmarshal(bodyBytes, &req); err != nil {
 			log.Error().Err(err).Str("id", id).Msg("[API] ERROR PUT /api/monitor: Invalid request body")
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
@@ -471,27 +513,44 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Set default check interval to 60 seconds if not provided
-		checkInterval := req.CheckInterval
-		if checkInterval <= 0 {
-			checkInterval = 60
-		}
-
 		// Update monitor fields
 		monitor.Name = req.Name
 		monitor.URL = req.URL
 		monitor.IsThirdParty = req.IsThirdParty
 		monitor.Icon = req.Icon
-		monitor.CheckInterval = checkInterval
+		
+		// Only update CheckInterval if explicitly provided (non-zero)
+		// This allows updating other fields without resetting the interval
+		if req.CheckInterval > 0 {
+			monitor.CheckInterval = req.CheckInterval
+		}
 
 		if err := db.Save(&monitor).Error; err != nil {
 			log.Error().Err(err).Str("id", id).Msg("[API] ERROR PUT /api/monitor: Failed to update monitor")
 			http.Error(w, "Failed to update monitor", http.StatusInternalServerError)
 			return
 		}
+		
+		// Reload monitor from database to ensure we have the latest data
+		if err := db.First(&monitor, monitorID).Error; err != nil {
+			log.Error().Err(err).Str("id", id).Msg("[API] ERROR PUT /api/monitor: Failed to reload monitor")
+			http.Error(w, "Failed to reload monitor", http.StatusInternalServerError)
+			return
+		}
 
 		log.Info().Str("id", id).Str("name", monitor.Name).Str("url", monitor.URL).
 			Int("check_interval", monitor.CheckInterval).Msg("[API] PUT /api/monitor: Updated monitor")
+		
+		// Trigger immediate scheduler refresh to pick up interval changes
+		// Use a delay to ensure database transaction is committed
+		go func() {
+			// Wait longer to ensure DB write is fully committed
+			time.Sleep(500 * time.Millisecond)
+			log.Info().Uint64("monitor_id", monitorID).
+				Int("check_interval", monitor.CheckInterval).
+				Msg("[API] Triggering scheduler refresh after monitor update")
+			monitorScheduler.refreshScheduler()
+		}()
 		
 		// Broadcast update via SSE
 		broadcastUpdate("monitor_update", monitor)

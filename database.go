@@ -31,7 +31,12 @@ func initDB() {
 	// Enable WAL mode and configure connection pool for better concurrency
 	// WAL mode allows multiple readers and one writer simultaneously
 	// _busy_timeout sets how long to wait for locks (in milliseconds)
-	dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=1"
+	// Performance pragmas:
+	// - _synchronous=NORMAL: Balance safety and performance (faster than FULL)
+	// - _cache_size=-64000: 64MB cache (negative = KB)
+	// - _temp_store=MEMORY: Store temp tables in memory
+	// - _mmap_size=268435456: 256MB memory-mapped I/O
+	dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=1&_synchronous=NORMAL&_cache_size=-64000&_temp_store=MEMORY&_mmap_size=268435456"
 	
 	// Open database connection with modernc.org/sqlite
 	sqlDB, err := sql.Open("sqlite", dsn)
@@ -50,8 +55,30 @@ func initDB() {
 	}
 
 	// Auto-migrate schemas
-	if err := db.AutoMigrate(&Monitor{}, &CheckHistory{}); err != nil {
+	if err := db.AutoMigrate(&Monitor{}, &CheckHistory{}, &CheckHistoryBucket{}); err != nil {
 		log.Fatal().Err(err).Msg("Failed to migrate database")
+	}
+
+	// Create partial index for active monitors (SQLite doesn't support partial indexes in GORM tags)
+	if err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_monitors_active 
+		ON monitors(status, uptime) 
+		WHERE paused = 0
+	`).Error; err != nil {
+		log.Warn().Err(err).Msg("Failed to create partial index for active monitors")
+	}
+
+	// Create unique index for check_history_buckets to ensure one bucket per monitor per hour
+	if err := db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_bucket_unique 
+		ON check_history_buckets(monitor_id, bucket_hour)
+	`).Error; err != nil {
+		log.Warn().Err(err).Msg("Failed to create unique index for check_history_buckets")
+	}
+
+	// Create aggregation views
+	if err := createAggregationViews(db); err != nil {
+		log.Fatal().Err(err).Msg("Failed to create aggregation views")
 	}
 
 	log.Info().Str("path", dbPath).Msg("✅ Database initialized")
@@ -216,5 +243,48 @@ func syncYAMLConfig(dbPath string) {
 	
 	broadcastStatsIfChanged()
 	log.Info().Msg("[Config] ✅ YAML configuration synchronized")
+}
+
+// createAggregationViews creates SQL views for common aggregations
+func createAggregationViews(db *gorm.DB) error {
+	// View 1: monitor_stats_24h - Pre-aggregates 24-hour uptime stats per monitor
+	view1SQL := `
+		CREATE VIEW IF NOT EXISTS monitor_stats_24h AS
+		SELECT 
+			monitor_id,
+			COUNT(*) as total_checks,
+			SUM(CASE WHEN status = 'up' THEN 1 ELSE 0 END) as up_checks,
+			CAST(SUM(CASE WHEN status = 'up' THEN 1 ELSE 0 END) AS REAL) / COUNT(*) * 100.0 as uptime_percent,
+			AVG(CASE WHEN status = 'up' AND response_time > 0 THEN response_time ELSE NULL END) as avg_response_time
+		FROM check_histories
+		WHERE created_at > datetime('now', '-24 hours')
+		GROUP BY monitor_id
+	`
+
+	if err := db.Exec(view1SQL).Error; err != nil {
+		return err
+	}
+
+	// View 2: global_stats_24h - Pre-aggregates global statistics
+	view2SQL := `
+		CREATE VIEW IF NOT EXISTS global_stats_24h AS
+		SELECT 
+			COUNT(DISTINCT m.id) as total_monitors,
+			SUM(CASE WHEN m.status = 'up' AND m.paused = 0 THEN 1 ELSE 0 END) as services_up,
+			SUM(CASE WHEN m.status = 'down' AND m.paused = 0 THEN 1 ELSE 0 END) as services_down,
+			AVG(CASE WHEN m.paused = 0 THEN m.uptime ELSE NULL END) as overall_uptime,
+			AVG(CASE WHEN ch.status = 'up' AND ch.response_time > 0 AND ch.created_at > datetime('now', '-24 hours') 
+				THEN ch.response_time ELSE NULL END) as avg_response_time
+		FROM monitors m
+		LEFT JOIN check_histories ch ON m.id = ch.monitor_id
+		WHERE m.paused = 0
+	`
+
+	if err := db.Exec(view2SQL).Error; err != nil {
+		return err
+	}
+
+	log.Info().Msg("✅ Created aggregation views")
+	return nil
 }
 

@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
+	"github.com/mailru/easyjson"
 	"github.com/rs/zerolog/log"
 )
 
@@ -88,14 +90,30 @@ func (b *SSEBroadcaster) broadcastMessage(message []byte) {
 
 // broadcastUpdate broadcasts an update to all SSE clients
 func broadcastUpdate(updateType string, data interface{}) {
-	update := map[string]interface{}{
-		"type": updateType,
-		"data": data,
-	}
-	jsonData, err := json.Marshal(update)
-	if err != nil {
-		log.Error().Err(err).Str("update_type", updateType).Msg("[SSE] Failed to marshal update")
-		return
+	var jsonData []byte
+	var err error
+	
+	// Try to use easyjson for supported types
+	if marshaler, ok := data.(easyjson.Marshaler); ok {
+		// For easyjson types, marshal the data directly and wrap in JSON object
+		dataBytes, marshalErr := easyjson.Marshal(marshaler)
+		if marshalErr != nil {
+			log.Error().Err(marshalErr).Str("update_type", updateType).Msg("[SSE] Failed to marshal data")
+			return
+		}
+		// Manually construct JSON object: {"type":"...","data":{...}}
+		jsonData = []byte(fmt.Sprintf(`{"type":"%s","data":%s}`, updateType, string(dataBytes)))
+	} else {
+		// Fallback to standard json for unsupported types
+		update := map[string]interface{}{
+			"type": updateType,
+			"data": data,
+		}
+		jsonData, err = json.Marshal(update)
+		if err != nil {
+			log.Error().Err(err).Str("update_type", updateType).Msg("[SSE] Failed to marshal update")
+			return
+		}
 	}
 	
 	log.Debug().Str("update_type", updateType).Int("bytes", len(jsonData)).Msg("[SSE] Broadcasting update")

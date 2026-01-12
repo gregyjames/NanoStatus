@@ -269,8 +269,17 @@ export function App() {
             break;
             
           case "monitor_added":
-            // Add new monitor to the list
-            setMonitors((prev) => [...prev, update.data]);
+            // Add new monitor to the list only if it doesn't already exist
+            setMonitors((prev) => {
+              const exists = prev.some((m) => String(m.id) === String(update.data.id));
+              if (exists) {
+                // Monitor already exists, update it instead
+                return prev.map((m) => 
+                  String(m.id) === String(update.data.id) ? update.data : m
+                );
+              }
+              return [...prev, update.data];
+            });
             setLastUpdate(new Date());
             break;
             

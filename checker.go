@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"net"
 	"net/http"
@@ -9,23 +10,22 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-co-op/gocron/v2"
 	"github.com/rs/zerolog/log"
 )
 
 // Shared HTTP client with connection pooling for health checks
 var httpClient *http.Client
 
-// MonitorScheduler manages per-monitor tickers for efficient scheduling
+// MonitorScheduler manages monitor jobs using gocron
 type MonitorScheduler struct {
-	tickers map[uint]*time.Ticker
-	stopCh  map[uint]chan struct{}
-	mu      sync.RWMutex
+	scheduler gocron.Scheduler
+	jobs      map[uint]gocron.Job // Track jobs by monitor ID
+	intervals map[uint]int        // Track current intervals to detect changes
+	mu        sync.RWMutex
 }
 
-var monitorScheduler = &MonitorScheduler{
-	tickers: make(map[uint]*time.Ticker),
-	stopCh:  make(map[uint]chan struct{}),
-}
+var monitorScheduler *MonitorScheduler
 
 func init() {
 	// Create optimized HTTP transport with connection pooling
@@ -47,10 +47,57 @@ func init() {
 		Timeout:   10 * time.Second,
 		Transport: transport,
 	}
+
+	// Initialize scheduler
+	sched, err := gocron.NewScheduler()
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to create scheduler")
+	}
+	
+	monitorScheduler = &MonitorScheduler{
+		scheduler: sched,
+		jobs:      make(map[uint]gocron.Job),
+		intervals: make(map[uint]int),
+	}
+	
+	// Start the scheduler
+	monitorScheduler.scheduler.Start()
+	log.Info().Msg("[Scheduler] Started gocron scheduler")
 }
 
 // checkService performs a health check on a single monitor
-func checkService(monitor *Monitor) {
+// monitorID can be a monitor ID (uint) or a monitor pointer
+func checkService(monitorIDOrPtr interface{}) {
+	var monitor Monitor
+	var monitorID uint
+	
+	// Handle both monitor ID and monitor pointer
+	switch v := monitorIDOrPtr.(type) {
+	case uint:
+		monitorID = v
+		if err := db.First(&monitor, monitorID).Error; err != nil {
+			log.Error().Err(err).Uint("monitor_id", monitorID).Msg("Failed to load monitor for check")
+			return
+		}
+	case *Monitor:
+		monitorID = v.ID
+		// Always read fresh from database to get latest CheckInterval and other fields
+		if err := db.First(&monitor, monitorID).Error; err != nil {
+			log.Error().Err(err).Uint("monitor_id", monitorID).Msg("Failed to load monitor for check")
+			return
+		}
+	default:
+		log.Error().Interface("type", v).Msg("checkService called with invalid type")
+		return
+	}
+	
+	// Skip if monitor is paused
+	if monitor.Paused {
+		log.Debug().Uint("monitor_id", monitorID).Msg("[Check] Skipping check for paused monitor")
+		return
+	}
+	
+	log.Debug().Uint("monitor_id", monitorID).Str("url", monitor.URL).Int("interval", monitor.CheckInterval).Msg("[Check] Starting health check")
 
 	start := time.Now()
 	var status string
@@ -133,35 +180,72 @@ func checkService(monitor *Monitor) {
 		}
 	}
 
-	// Calculate uptime from last 24 hours of checks using a single query
-	twentyFourHoursAgo := now.Add(-24 * time.Hour)
-	var result struct {
-		TotalCount int64
-		UpCount    int64
+	// Calculate uptime from last 24 hours of checks
+	// Try to use monitor_stats_24h view first for better performance
+	var viewResult struct {
+		TotalChecks    sql.NullInt64
+		UpChecks       sql.NullInt64
+		UptimePercent  sql.NullFloat64
 	}
 	
-	uptimeErr := db.Model(&CheckHistory{}).
-		Select("COUNT(*) as total_count, SUM(CASE WHEN status = 'up' THEN 1 ELSE 0 END) as up_count").
-		Where("monitor_id = ? AND created_at > ?", monitor.ID, twentyFourHoursAgo).
-		Scan(&result).Error
+	viewErr := db.Raw(`
+		SELECT total_checks, up_checks, uptime_percent 
+		FROM monitor_stats_24h 
+		WHERE monitor_id = ?
+	`, monitor.ID).Row().Scan(
+		&viewResult.TotalChecks,
+		&viewResult.UpChecks,
+		&viewResult.UptimePercent,
+	)
 	
-	if uptimeErr == nil && result.TotalCount > 0 {
-		monitor.Uptime = float64(result.UpCount) / float64(result.TotalCount) * 100
-	} else {
-		// If no checks in last 24h, use current status
-		if status == "up" {
-			monitor.Uptime = 100.0
+	if viewErr == nil && viewResult.TotalChecks.Valid && viewResult.TotalChecks.Int64 > 0 {
+		// Use view result
+		if viewResult.UptimePercent.Valid {
+			monitor.Uptime = viewResult.UptimePercent.Float64
 		} else {
-			monitor.Uptime = 0.0
+			monitor.Uptime = float64(viewResult.UpChecks.Int64) / float64(viewResult.TotalChecks.Int64) * 100
+		}
+		log.Debug().Uint("monitor_id", monitor.ID).Float64("uptime", monitor.Uptime).Msg("[Check] Using view for uptime")
+	} else {
+		// Fallback to direct query if view is unavailable
+		twentyFourHoursAgo := now.Add(-24 * time.Hour)
+		var result struct {
+			TotalCount int64
+			UpCount    int64
+		}
+		
+		uptimeErr := db.Model(&CheckHistory{}).
+			Select("COUNT(*) as total_count, SUM(CASE WHEN status = 'up' THEN 1 ELSE 0 END) as up_count").
+			Where("monitor_id = ? AND created_at > ?", monitor.ID, twentyFourHoursAgo).
+			Scan(&result).Error
+		
+		if uptimeErr == nil && result.TotalCount > 0 {
+			monitor.Uptime = float64(result.UpCount) / float64(result.TotalCount) * 100
+		} else {
+			// If no checks in last 24h, use current status
+			if status == "up" {
+				monitor.Uptime = 100.0
+			} else {
+				monitor.Uptime = 0.0
+			}
 		}
 	}
 
-	// Update monitor
-	monitor.Status = status
-	monitor.ResponseTime = responseTime
-	monitor.LastCheck = lastCheck
-	monitor.UpdatedAt = now
-	db.Save(monitor)
+	// Update monitor - only update check-related fields, not CheckInterval
+	// This ensures we don't overwrite CheckInterval changes made via API
+	db.Model(&monitor).Updates(map[string]interface{}{
+		"status":        status,
+		"response_time": responseTime,
+		"last_check":    lastCheck,
+		"uptime":        monitor.Uptime,
+		"updated_at":    now,
+	})
+	
+	// Reload monitor from database to get fresh data including CheckInterval for broadcast
+	if err := db.First(&monitor, monitorID).Error; err != nil {
+		log.Error().Err(err).Uint("monitor_id", monitorID).Msg("Failed to reload monitor after update")
+		return
+	}
 
 	// Broadcast monitor update via SSE
 	broadcastUpdate("monitor_update", monitor)
@@ -187,38 +271,21 @@ func checkAllServices() {
 	}
 }
 
-// stopMonitorTicker stops the ticker for a specific monitor
-func (ms *MonitorScheduler) stopMonitorTicker(monitorID uint) {
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
-	
-	if ticker, exists := ms.tickers[monitorID]; exists {
-		ticker.Stop()
-		delete(ms.tickers, monitorID)
-	}
-	
-	if stopCh, exists := ms.stopCh[monitorID]; exists {
-		close(stopCh)
-		delete(ms.stopCh, monitorID)
-	}
-}
-
-// startMonitorTicker starts a ticker for a specific monitor
-func (ms *MonitorScheduler) startMonitorTicker(monitor *Monitor) {
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
-	
-	// Stop existing ticker if any
-	if ticker, exists := ms.tickers[monitor.ID]; exists {
-		ticker.Stop()
-	}
-	if stopCh, exists := ms.stopCh[monitor.ID]; exists {
-		close(stopCh)
-	}
-	
+// addMonitorJob adds or updates a job for a monitor
+// Only updates if interval changed or job doesn't exist
+func (ms *MonitorScheduler) addMonitorJob(monitor *Monitor) error {
 	// Skip paused monitors
 	if monitor.Paused {
-		return
+		ms.mu.Lock()
+		// Remove job if monitor is now paused
+		if job, exists := ms.jobs[monitor.ID]; exists {
+			ms.scheduler.RemoveJob(job.ID())
+			delete(ms.jobs, monitor.ID)
+			delete(ms.intervals, monitor.ID)
+		}
+		ms.mu.Unlock()
+		log.Debug().Uint("monitor_id", monitor.ID).Msg("[Scheduler] Monitor is paused, not adding job")
+		return nil
 	}
 	
 	interval := monitor.CheckInterval
@@ -226,66 +293,122 @@ func (ms *MonitorScheduler) startMonitorTicker(monitor *Monitor) {
 		interval = 60 // Default to 60 seconds
 	}
 	
-	// Create ticker and stop channel
-	ticker := time.NewTicker(time.Duration(interval) * time.Second)
-	stopCh := make(chan struct{})
+	ms.mu.RLock()
+	currentInterval, hasJob := ms.intervals[monitor.ID]
+	ms.mu.RUnlock()
 	
-	ms.tickers[monitor.ID] = ticker
-	ms.stopCh[monitor.ID] = stopCh
+	// Only update if interval changed or job doesn't exist
+	if hasJob && currentInterval == interval {
+		log.Debug().Uint("monitor_id", monitor.ID).
+			Int("interval", interval).
+			Msg("[Scheduler] Job interval unchanged, skipping update")
+		return nil
+	}
 	
-	// Start goroutine for this monitor
-	go func(m *Monitor, t *time.Ticker, stop chan struct{}) {
-		// Check immediately
-		go checkService(m)
-		
-		for {
-			select {
-			case <-t.C:
-				go checkService(m)
-			case <-stop:
-				return
-			}
+	// Remove existing job if interval changed
+	ms.mu.Lock()
+	if job, exists := ms.jobs[monitor.ID]; exists {
+		log.Info().Uint("monitor_id", monitor.ID).
+			Int("old_interval", currentInterval).
+			Int("new_interval", interval).
+			Msg("[Scheduler] Interval changed, removing old job")
+		if err := ms.scheduler.RemoveJob(job.ID()); err != nil {
+			log.Warn().Err(err).Uint("monitor_id", monitor.ID).Msg("[Scheduler] Failed to remove existing job")
 		}
-	}(monitor, ticker, stopCh)
+		delete(ms.jobs, monitor.ID)
+		delete(ms.intervals, monitor.ID)
+	}
+	ms.mu.Unlock()
+	
+	// Give scheduler time to process removal
+	time.Sleep(100 * time.Millisecond)
+	
+	// Create job that runs checkService with monitor ID
+	// Capture monitorID in closure
+	monitorID := monitor.ID
+	
+	// Create job that runs immediately, then at the specified interval
+	job, err := ms.scheduler.NewJob(
+		gocron.DurationJob(time.Duration(interval)*time.Second),
+		gocron.NewTask(func() {
+			checkService(monitorID)
+		}),
+		gocron.WithName(fmt.Sprintf("monitor-%d", monitorID)),
+		gocron.WithStartAt(gocron.WithStartImmediately()),
+	)
+	
+	if err != nil {
+		log.Error().Err(err).Uint("monitor_id", monitor.ID).Int("interval", interval).Msg("[Scheduler] Failed to create job")
+		return err
+	}
+	
+	ms.mu.Lock()
+	ms.jobs[monitor.ID] = job
+	ms.intervals[monitor.ID] = interval
+	ms.mu.Unlock()
+	
+	log.Info().Uint("monitor_id", monitor.ID).
+		Int("interval", interval).
+		Int("db_check_interval", monitor.CheckInterval).
+		Str("name", monitor.Name).
+		Msg("[Scheduler] Added/updated job for monitor with interval")
+	
+	return nil
 }
 
-// refreshScheduler reloads all monitors and updates tickers
+// removeMonitorJob removes a job for a monitor
+func (ms *MonitorScheduler) removeMonitorJob(monitorID uint) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	
+	if job, exists := ms.jobs[monitorID]; exists {
+		if err := ms.scheduler.RemoveJob(job.ID()); err != nil {
+			log.Warn().Err(err).Uint("monitor_id", monitorID).Msg("[Scheduler] Failed to remove job")
+		}
+		delete(ms.jobs, monitorID)
+		delete(ms.intervals, monitorID)
+		log.Info().Uint("monitor_id", monitorID).Msg("[Scheduler] Removed job for monitor")
+	}
+}
+
+// refreshScheduler reloads all monitors and updates jobs
 func (ms *MonitorScheduler) refreshScheduler() {
 	var monitors []Monitor
-	db.Find(&monitors)
+	if err := db.Find(&monitors).Error; err != nil {
+		log.Error().Err(err).Msg("[Scheduler] Failed to load monitors for refresh")
+		return
+	}
+	
+	log.Debug().Int("monitor_count", len(monitors)).Msg("[Scheduler] Refreshing scheduler")
 	
 	ms.mu.Lock()
 	activeIDs := make(map[uint]bool)
+	ms.mu.Unlock()
 	
-	// Start/update tickers for all active monitors
+	// Add/update jobs for all monitors - only update if interval changed
 	for i := range monitors {
 		monitor := &monitors[i]
 		activeIDs[monitor.ID] = true
 		
-		// Check if ticker exists
-		if _, exists := ms.tickers[monitor.ID]; exists {
-			// If paused, stop the ticker; otherwise keep it running
-			// (interval changes will be handled on next refresh)
-			if monitor.Paused {
-				ms.mu.Unlock()
-				ms.stopMonitorTicker(monitor.ID)
-				ms.mu.Lock()
-			}
-		} else {
-			// New monitor or was paused - start ticker if not paused
-			if !monitor.Paused {
-				ms.mu.Unlock()
-				ms.startMonitorTicker(monitor)
-				ms.mu.Lock()
-			}
+		// Always read fresh from database for each monitor to get latest CheckInterval
+		var freshMonitor Monitor
+		if err := db.First(&freshMonitor, monitor.ID).Error; err != nil {
+			log.Error().Err(err).Uint("monitor_id", monitor.ID).Msg("[Scheduler] Failed to load monitor")
+			continue
+		}
+		
+		// Call addMonitorJob - it will only update if interval changed or job doesn't exist
+		if err := ms.addMonitorJob(&freshMonitor); err != nil {
+			log.Error().Err(err).Uint("monitor_id", freshMonitor.ID).Msg("[Scheduler] Failed to add job")
 		}
 	}
 	
-	// Stop tickers for monitors that no longer exist
-	for monitorID := range ms.tickers {
+	// Remove jobs for monitors that no longer exist
+	ms.mu.Lock()
+	for monitorID := range ms.jobs {
 		if !activeIDs[monitorID] {
 			ms.mu.Unlock()
-			ms.stopMonitorTicker(monitorID)
+			ms.removeMonitorJob(monitorID)
 			ms.mu.Lock()
 		}
 	}
@@ -311,4 +434,3 @@ func startChecker() {
 		}
 	}()
 }
-

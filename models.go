@@ -15,6 +15,7 @@ type Monitor struct {
 	Icon         string    `json:"icon,omitempty"`
 	CheckInterval int      `gorm:"default:60" json:"checkInterval"` // Interval in seconds
 	Paused       bool      `gorm:"default:false;index:idx_paused_status" json:"paused"` // Whether monitoring is paused
+	// Note: Partial index idx_monitors_active on (Status, Uptime) WHERE paused = 0 will be created via raw SQL
 	ConfigHash   string    `gorm:"index" json:"configHash,omitempty"` // Hash of YAML config (empty if created via UI/API)
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
@@ -40,10 +41,23 @@ type StatsResponse struct {
 // CheckHistory stores historical check data
 type CheckHistory struct {
 	ID           uint      `gorm:"primaryKey"`
-	MonitorID    uint      `gorm:"not null;index:idx_monitor_created;index:idx_monitor_created_status"`
-	Status       string    `gorm:"not null;index:idx_monitor_created_status"`
-	ResponseTime int       `gorm:"default:0;index:idx_response_time_status"`
-	CreatedAt    time.Time `gorm:"index:idx_monitor_created;index:idx_monitor_created_status;index:idx_created_response"`
+	MonitorID    uint      `gorm:"not null;index:idx_monitor_created;index:idx_monitor_created_status;index:idx_monitor_created_status_response"`
+	Status       string    `gorm:"not null;index:idx_monitor_created_status;index:idx_monitor_created_status_response"`
+	ResponseTime int       `gorm:"default:0;index:idx_response_time_status;index:idx_monitor_created_status_response"`
+	CreatedAt    time.Time `gorm:"index:idx_monitor_created;index:idx_monitor_created_status;index:idx_monitor_created_status_response"`
+}
+
+// CheckHistoryBucket stores aggregated hourly buckets of check history for older data
+type CheckHistoryBucket struct {
+	ID             uint      `gorm:"primaryKey"`
+	MonitorID      uint      `gorm:"not null;index:idx_bucket_monitor_hour;uniqueIndex:idx_bucket_unique"`
+	BucketHour     int64     `gorm:"not null;index:idx_bucket_monitor_hour;uniqueIndex:idx_bucket_unique"` // Unix timestamp rounded to hour
+	TotalChecks    int       `gorm:"default:0"`
+	UpChecks       int       `gorm:"default:0"`
+	AvgResponseTime float64   `gorm:"default:0"`
+	MinResponseTime int       `gorm:"default:0"`
+	MaxResponseTime int       `gorm:"default:0"`
+	CreatedAt      time.Time
 }
 
 // ResponseTimeData represents formatted response time data for charts
