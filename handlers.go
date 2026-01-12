@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -14,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 )
 
@@ -148,57 +148,57 @@ func getResponseTimeData(monitorID string, timeRange string) []ResponseTimeData 
 
 // apiMonitors handles GET requests to list all monitors
 func apiMonitors(w http.ResponseWriter, r *http.Request) {
-	log.Printf("[API] %s %s", r.Method, r.URL.Path)
+	log.Info().Str("method", r.Method).Str("path", r.URL.Path).Msg("[API] Request")
 	
 	setJSONHeaders(w)
 
 	if r.Method == http.MethodGet {
 		var monitors []Monitor
 		if err := db.Find(&monitors).Error; err != nil {
-			log.Printf("[API] ERROR GET /api/monitors: %v", err)
+			log.Error().Err(err).Msg("[API] ERROR GET /api/monitors")
 			http.Error(w, "Failed to fetch monitors", http.StatusInternalServerError)
 			return
 		}
-		log.Printf("[API] GET /api/monitors: returned %d monitors", len(monitors))
+		log.Info().Int("count", len(monitors)).Msg("[API] GET /api/monitors")
 		if err := encodeJSONWithCompression(w, r, monitors); err != nil {
-			log.Printf("[API] ERROR encoding monitors: %v", err)
+			log.Error().Err(err).Msg("[API] ERROR encoding monitors")
 		}
 		return
 	}
 
-	log.Printf("[API] ERROR %s /api/monitors: Method not allowed", r.Method)
+	log.Warn().Str("method", r.Method).Msg("[API] ERROR Method not allowed")
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 }
 
 // apiCreateMonitor handles POST requests to create a new monitor
 func apiCreateMonitor(w http.ResponseWriter, r *http.Request) {
-	log.Printf("[API] %s %s", r.Method, r.URL.Path)
+	log.Info().Str("method", r.Method).Str("path", r.URL.Path).Msg("[API] Request")
 	
 	setJSONHeaders(w)
 	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
 	if r.Method == http.MethodOptions {
-		log.Printf("[API] OPTIONS /api/monitors/create: CORS preflight")
+		log.Debug().Msg("[API] OPTIONS /api/monitors/create: CORS preflight")
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
 	if r.Method != http.MethodPost {
-		log.Printf("[API] ERROR %s /api/monitors/create: Method not allowed", r.Method)
+		log.Warn().Str("method", r.Method).Msg("[API] ERROR Method not allowed")
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var req CreateMonitorRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("[API] ERROR POST /api/monitors/create: Invalid request body: %v", err)
+		log.Error().Err(err).Msg("[API] ERROR POST /api/monitors/create: Invalid request body")
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.Name == "" || req.URL == "" {
-		log.Printf("[API] ERROR POST /api/monitors/create: Missing required fields (name=%q, url=%q)", req.Name, req.URL)
+		log.Warn().Str("name", req.Name).Str("url", req.URL).Msg("[API] ERROR POST /api/monitors/create: Missing required fields")
 		http.Error(w, "Name and URL are required", http.StatusBadRequest)
 		return
 	}
@@ -222,12 +222,13 @@ func apiCreateMonitor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := db.Create(&monitor).Error; err != nil {
-		log.Printf("[API] ERROR POST /api/monitors/create: Failed to create monitor: %v", err)
+		log.Error().Err(err).Msg("[API] ERROR POST /api/monitors/create: Failed to create monitor")
 		http.Error(w, "Failed to create monitor", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("[API] POST /api/monitors/create: Created monitor ID=%d, name=%q, url=%q, checkInterval=%ds", monitor.ID, monitor.Name, monitor.URL, monitor.CheckInterval)
+	log.Info().Uint("id", monitor.ID).Str("name", monitor.Name).Str("url", monitor.URL).
+		Int("check_interval", monitor.CheckInterval).Msg("[API] POST /api/monitors/create: Created monitor")
 
 	// Immediately check the new monitor
 	go checkService(&monitor)
@@ -240,27 +241,27 @@ func apiCreateMonitor(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 	if err := encodeJSONWithCompression(w, r, monitor); err != nil {
-		log.Printf("[API] ERROR encoding monitor: %v", err)
+		log.Error().Err(err).Msg("[API] ERROR encoding monitor")
 	}
 }
 
 // apiStats handles GET requests to retrieve overall statistics
 func apiStats(w http.ResponseWriter, r *http.Request) {
-	log.Printf("[API] %s %s", r.Method, r.URL.Path)
+	log.Info().Str("method", r.Method).Str("path", r.URL.Path).Msg("[API] Request")
 	
 	setJSONHeaders(w)
 
 	if r.Method != http.MethodGet {
-		log.Printf("[API] ERROR %s /api/stats: Method not allowed", r.Method)
+		log.Warn().Str("method", r.Method).Msg("[API] ERROR Method not allowed")
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	stats := getStats()
-	log.Printf("[API] GET /api/stats: overallUptime=%.2f%%, servicesUp=%d, servicesDown=%d, avgResponseTime=%dms", 
-		stats.OverallUptime, stats.ServicesUp, stats.ServicesDown, stats.AvgResponseTime)
+	log.Info().Float64("uptime", stats.OverallUptime).Int("up", stats.ServicesUp).
+		Int("down", stats.ServicesDown).Int("avg_ms", stats.AvgResponseTime).Msg("[API] GET /api/stats")
 	if err := encodeJSONWithCompression(w, r, stats); err != nil {
-		log.Printf("[API] ERROR encoding stats: %v", err)
+		log.Error().Err(err).Msg("[API] ERROR encoding stats")
 	}
 }
 
@@ -274,26 +275,26 @@ func apiResponseTime(w http.ResponseWriter, r *http.Request) {
 	if timeRange == "" {
 		timeRange = "24h" // Default to 24 hours
 	}
-	log.Printf("[API] %s %s?id=%s&range=%s", r.Method, r.URL.Path, monitorID, timeRange)
+	log.Info().Str("method", r.Method).Str("path", r.URL.Path).Str("id", monitorID).Str("range", timeRange).Msg("[API] Request")
 	
 	setJSONHeaders(w)
 
 	if r.Method != http.MethodGet {
-		log.Printf("[API] ERROR %s /api/response-time: Method not allowed", r.Method)
+		log.Warn().Str("method", r.Method).Msg("[API] ERROR Method not allowed")
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	data := getResponseTimeData(monitorID, timeRange)
-	log.Printf("[API] GET /api/response-time?id=%s&range=%s: returned %d data points", monitorID, timeRange, len(data))
+	log.Info().Str("id", monitorID).Str("range", timeRange).Int("points", len(data)).Msg("[API] GET /api/response-time")
 	if err := encodeJSONWithCompression(w, r, data); err != nil {
-		log.Printf("[API] ERROR encoding response time data: %v", err)
+		log.Error().Err(err).Msg("[API] ERROR encoding response time data")
 	}
 }
 
 // apiSSE handles Server-Sent Events connections
 func apiSSE(w http.ResponseWriter, r *http.Request) {
-	log.Printf("[SSE] New connection request from %s (User-Agent: %s)", r.RemoteAddr, r.UserAgent())
+	log.Info().Str("remote_addr", r.RemoteAddr).Str("user_agent", r.UserAgent()).Msg("[SSE] New connection request")
 	
 	// Set headers for SSE
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -307,7 +308,7 @@ func apiSSE(w http.ResponseWriter, r *http.Request) {
 	client := sseBroadcaster.addClient(clientID)
 	defer func() {
 		sseBroadcaster.removeClient(clientID)
-		log.Printf("[SSE] Cleanup completed for client %s", clientID)
+		log.Debug().Str("client_id", clientID).Msg("[SSE] Cleanup completed")
 	}()
 
 	// Send initial connection message
@@ -315,9 +316,9 @@ func apiSSE(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "data: %s\n\n", connectMsg)
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
-		log.Printf("[SSE] Sent connection confirmation to client %s", clientID)
+		log.Debug().Str("client_id", clientID).Msg("[SSE] Sent connection confirmation")
 	} else {
-		log.Printf("[SSE] WARNING: ResponseWriter does not support flushing for client %s", clientID)
+		log.Warn().Str("client_id", clientID).Msg("[SSE] ResponseWriter does not support flushing")
 	}
 
 	// Keep connection alive and send updates
@@ -335,10 +336,10 @@ func apiSSE(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "data: %s\n\n", string(message))
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
-				log.Printf("[SSE] Sent message #%d to client %s (%d bytes)", 
-					messageCount, clientID, len(message))
+				log.Debug().Int("message_num", messageCount).Str("client_id", clientID).
+					Int("bytes", len(message)).Msg("[SSE] Sent message")
 			} else {
-				log.Printf("[SSE] ERROR: Cannot flush message to client %s", clientID)
+				log.Error().Str("client_id", clientID).Msg("[SSE] ERROR: Cannot flush message")
 			}
 		case <-ticker.C:
 			// Send keepalive
@@ -346,12 +347,13 @@ func apiSSE(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, ": keepalive\n\n")
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
-				log.Printf("[SSE] Sent keepalive #%d to client %s", keepaliveCount, clientID)
+				log.Debug().Int("keepalive_num", keepaliveCount).Str("client_id", clientID).Msg("[SSE] Sent keepalive")
 			}
 		case <-r.Context().Done():
 			duration := time.Since(startTime)
-			log.Printf("[SSE] Client %s disconnected after %v (sent %d messages, %d keepalives)", 
-				clientID, duration, messageCount, keepaliveCount)
+			log.Info().Str("client_id", clientID).Dur("duration", duration).
+				Int("messages", messageCount).Int("keepalives", keepaliveCount).
+				Msg("[SSE] Client disconnected")
 			return
 		}
 	}
@@ -360,14 +362,14 @@ func apiSSE(w http.ResponseWriter, r *http.Request) {
 // apiMonitor handles GET, PUT, and DELETE requests for individual monitors
 func apiMonitor(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
-	log.Printf("[API] %s %s?id=%s", r.Method, r.URL.Path, id)
+	log.Info().Str("method", r.Method).Str("path", r.URL.Path).Str("id", id).Msg("[API] Request")
 	
 	setCORSHeaders(w)
 	w.Header().Set("Access-Control-Allow-Methods", "GET, PUT, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
 	if r.Method == http.MethodOptions {
-		log.Printf("[API] OPTIONS /api/monitor: CORS preflight")
+		log.Debug().Msg("[API] OPTIONS /api/monitor: CORS preflight")
 		w.WriteHeader(http.StatusOK)
 		return
 	}
@@ -375,7 +377,7 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		setJSONHeaders(w)
 		if id == "" {
-			log.Printf("[API] ERROR GET /api/monitor: Missing id parameter")
+			log.Warn().Msg("[API] ERROR GET /api/monitor: Missing id parameter")
 			http.Error(w, "Missing id parameter", http.StatusBadRequest)
 			return
 		}
@@ -383,20 +385,20 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 		var monitor Monitor
 		monitorID, err := strconv.ParseUint(id, 10, 32)
 		if err != nil {
-			log.Printf("[API] ERROR GET /api/monitor?id=%s: Invalid id parameter: %v", id, err)
+			log.Error().Err(err).Str("id", id).Msg("[API] ERROR GET /api/monitor: Invalid id parameter")
 			http.Error(w, "Invalid id parameter", http.StatusBadRequest)
 			return
 		}
 
 		if err := db.First(&monitor, monitorID).Error; err != nil {
-			log.Printf("[API] ERROR GET /api/monitor?id=%s: Monitor not found", id)
+			log.Warn().Str("id", id).Msg("[API] ERROR GET /api/monitor: Monitor not found")
 			http.Error(w, "Monitor not found", http.StatusNotFound)
 			return
 		}
 
-		log.Printf("[API] GET /api/monitor?id=%s: returned monitor name=%q", id, monitor.Name)
+		log.Info().Str("id", id).Str("name", monitor.Name).Msg("[API] GET /api/monitor")
 		if err := encodeJSONWithCompression(w, r, monitor); err != nil {
-			log.Printf("[API] ERROR encoding monitor: %v", err)
+			log.Error().Err(err).Msg("[API] ERROR encoding monitor")
 		}
 		return
 	}
@@ -404,21 +406,21 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPut {
 		setJSONHeaders(w)
 		if id == "" {
-			log.Printf("[API] ERROR PUT /api/monitor: Missing id parameter")
+			log.Warn().Msg("[API] ERROR PUT /api/monitor: Missing id parameter")
 			http.Error(w, "Missing id parameter", http.StatusBadRequest)
 			return
 		}
 
 		monitorID, err := strconv.ParseUint(id, 10, 32)
 		if err != nil {
-			log.Printf("[API] ERROR PUT /api/monitor?id=%s: Invalid id parameter: %v", id, err)
+			log.Error().Err(err).Str("id", id).Msg("[API] ERROR PUT /api/monitor: Invalid id parameter")
 			http.Error(w, "Invalid id parameter", http.StatusBadRequest)
 			return
 		}
 
 		var monitor Monitor
 		if err := db.First(&monitor, monitorID).Error; err != nil {
-			log.Printf("[API] ERROR PUT /api/monitor?id=%s: Monitor not found", id)
+			log.Warn().Str("id", id).Msg("[API] ERROR PUT /api/monitor: Monitor not found")
 			http.Error(w, "Monitor not found", http.StatusNotFound)
 			return
 		}
@@ -426,7 +428,7 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 		// Read body once
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
-			log.Printf("[API] ERROR PUT /api/monitor?id=%s: Failed to read body: %v", id, err)
+			log.Error().Err(err).Str("id", id).Msg("[API] ERROR PUT /api/monitor: Failed to read body")
 			http.Error(w, "Failed to read request body", http.StatusBadRequest)
 			return
 		}
@@ -439,18 +441,18 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 			// This is a pause/unpause request
 			monitor.Paused = *pauseReq.Paused
 			if err := db.Save(&monitor).Error; err != nil {
-				log.Printf("[API] ERROR PUT /api/monitor?id=%s: Failed to update paused state: %v", id, err)
+				log.Error().Err(err).Str("id", id).Msg("[API] ERROR PUT /api/monitor: Failed to update paused state")
 				http.Error(w, "Failed to update paused state", http.StatusInternalServerError)
 				return
 			}
-			log.Printf("[API] PUT /api/monitor?id=%s: Updated paused state to %v", id, monitor.Paused)
+			log.Info().Str("id", id).Bool("paused", monitor.Paused).Msg("[API] PUT /api/monitor: Updated paused state")
 			
 			// Broadcast update via SSE
 			broadcastUpdate("monitor_update", monitor)
 			broadcastStatsIfChanged()
 			
 			if err := encodeJSONWithCompression(w, r, monitor); err != nil {
-				log.Printf("[API] ERROR encoding monitor: %v", err)
+				log.Error().Err(err).Msg("[API] ERROR encoding monitor")
 			}
 			return
 		}
@@ -458,13 +460,13 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 		// Regular update request
 		var req CreateMonitorRequest
 		if err := json.Unmarshal(bodyBytes, &req); err != nil {
-			log.Printf("[API] ERROR PUT /api/monitor?id=%s: Invalid request body: %v", id, err)
+			log.Error().Err(err).Str("id", id).Msg("[API] ERROR PUT /api/monitor: Invalid request body")
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
 
 		if req.Name == "" || req.URL == "" {
-			log.Printf("[API] ERROR PUT /api/monitor?id=%s: Missing required fields", id)
+			log.Warn().Str("id", id).Msg("[API] ERROR PUT /api/monitor: Missing required fields")
 			http.Error(w, "Name and URL are required", http.StatusBadRequest)
 			return
 		}
@@ -483,33 +485,34 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 		monitor.CheckInterval = checkInterval
 
 		if err := db.Save(&monitor).Error; err != nil {
-			log.Printf("[API] ERROR PUT /api/monitor?id=%s: Failed to update monitor: %v", id, err)
+			log.Error().Err(err).Str("id", id).Msg("[API] ERROR PUT /api/monitor: Failed to update monitor")
 			http.Error(w, "Failed to update monitor", http.StatusInternalServerError)
 			return
 		}
 
-		log.Printf("[API] PUT /api/monitor?id=%s: Updated monitor name=%q, url=%q, checkInterval=%ds", id, monitor.Name, monitor.URL, monitor.CheckInterval)
+		log.Info().Str("id", id).Str("name", monitor.Name).Str("url", monitor.URL).
+			Int("check_interval", monitor.CheckInterval).Msg("[API] PUT /api/monitor: Updated monitor")
 		
 		// Broadcast update via SSE
 		broadcastUpdate("monitor_update", monitor)
 		broadcastStatsIfChanged()
 		
 		if err := encodeJSONWithCompression(w, r, monitor); err != nil {
-			log.Printf("[API] ERROR encoding monitor: %v", err)
+			log.Error().Err(err).Msg("[API] ERROR encoding monitor")
 		}
 		return
 	}
 
 	if r.Method == http.MethodDelete {
 		if id == "" {
-			log.Printf("[API] ERROR DELETE /api/monitor: Missing id parameter")
+			log.Warn().Msg("[API] ERROR DELETE /api/monitor: Missing id parameter")
 			http.Error(w, "Missing id parameter", http.StatusBadRequest)
 			return
 		}
 
 		monitorID, err := strconv.ParseUint(id, 10, 32)
 		if err != nil {
-			log.Printf("[API] ERROR DELETE /api/monitor?id=%s: Invalid id parameter: %v", id, err)
+			log.Error().Err(err).Str("id", id).Msg("[API] ERROR DELETE /api/monitor: Invalid id parameter")
 			http.Error(w, "Invalid id parameter", http.StatusBadRequest)
 			return
 		}
@@ -517,18 +520,18 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 		// Check if monitor exists first
 		var monitor Monitor
 		if err := db.First(&monitor, monitorID).Error; err != nil {
-			log.Printf("[API] ERROR DELETE /api/monitor?id=%s: Monitor not found", id)
+			log.Warn().Str("id", id).Msg("[API] ERROR DELETE /api/monitor: Monitor not found")
 			http.Error(w, "Monitor not found", http.StatusNotFound)
 			return
 		}
 
 		if err := db.Delete(&Monitor{}, monitorID).Error; err != nil {
-			log.Printf("[API] ERROR DELETE /api/monitor?id=%s: Failed to delete: %v", id, err)
+			log.Error().Err(err).Str("id", id).Msg("[API] ERROR DELETE /api/monitor: Failed to delete")
 			http.Error(w, "Failed to delete monitor", http.StatusInternalServerError)
 			return
 		}
 
-		log.Printf("[API] DELETE /api/monitor?id=%s: Successfully deleted monitor name=%q", id, monitor.Name)
+		log.Info().Str("id", id).Str("name", monitor.Name).Msg("[API] DELETE /api/monitor: Successfully deleted monitor")
 		
 		// Broadcast deletion via SSE
 		broadcastUpdate("monitor_deleted", map[string]interface{}{"id": monitorID})
@@ -540,18 +543,18 @@ func apiMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("[API] ERROR %s /api/monitor: Method not allowed", r.Method)
+	log.Warn().Str("method", r.Method).Msg("[API] ERROR Method not allowed")
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 }
 
 // apiExportMonitors handles GET requests to export all monitors as YAML
 func apiExportMonitors(w http.ResponseWriter, r *http.Request) {
-	log.Printf("[API] %s %s", r.Method, r.URL.Path)
+	log.Info().Str("method", r.Method).Str("path", r.URL.Path).Msg("[API] Request")
 
 	setCORSHeaders(w)
 
 	if r.Method != http.MethodGet {
-		log.Printf("[API] ERROR %s /api/monitors/export: Method not allowed", r.Method)
+		log.Warn().Str("method", r.Method).Msg("[API] ERROR Method not allowed")
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -559,7 +562,7 @@ func apiExportMonitors(w http.ResponseWriter, r *http.Request) {
 	// Fetch all monitors from database
 	var monitors []Monitor
 	if err := db.Find(&monitors).Error; err != nil {
-		log.Printf("[API] ERROR GET /api/monitors/export: Failed to fetch monitors: %v", err)
+		log.Error().Err(err).Msg("[API] ERROR GET /api/monitors/export: Failed to fetch monitors")
 		http.Error(w, "Failed to fetch monitors", http.StatusInternalServerError)
 		return
 	}
@@ -587,7 +590,7 @@ func apiExportMonitors(w http.ResponseWriter, r *http.Request) {
 	encoder.SetIndent(2) // Use 2-space indentation
 	
 	if err := encoder.Encode(&config); err != nil {
-		log.Printf("[API] ERROR GET /api/monitors/export: Failed to marshal YAML: %v", err)
+		log.Error().Err(err).Msg("[API] ERROR GET /api/monitors/export: Failed to marshal YAML")
 		http.Error(w, "Failed to generate YAML", http.StatusInternalServerError)
 		return
 	}
@@ -606,11 +609,11 @@ func apiExportMonitors(w http.ResponseWriter, r *http.Request) {
 
 	// Write YAML data
 	if _, err := w.Write(yamlData); err != nil {
-		log.Printf("[API] ERROR GET /api/monitors/export: Failed to write response: %v", err)
+		log.Error().Err(err).Msg("[API] ERROR GET /api/monitors/export: Failed to write response")
 		return
 	}
 
-	log.Printf("[API] GET /api/monitors/export: Exported %d monitors as YAML", len(monitors))
+	log.Info().Int("count", len(monitors)).Msg("[API] GET /api/monitors/export: Exported monitors as YAML")
 }
 
 // convertUnicodeEscapes converts YAML Unicode escape sequences like "\U0001F4BB" back to actual emojis

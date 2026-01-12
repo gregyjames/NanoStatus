@@ -3,11 +3,13 @@ package main
 import (
 	"embed"
 	"io/fs"
-	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 )
 
@@ -15,6 +17,32 @@ import (
 var staticFiles embed.FS
 
 var db *gorm.DB
+
+func init() {
+	// Configure zerolog for console output with colors
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	
+	// Use console writer for pretty output in development
+	// In production, you can set ZEROLOG_LOG_LEVEL env var to control log level
+	if os.Getenv("ZEROLOG_LOG_LEVEL") == "" {
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339})
+	}
+	
+	// Set log level from environment variable if provided
+	if level := os.Getenv("ZEROLOG_LOG_LEVEL"); level != "" {
+		switch level {
+		case "debug":
+			zerolog.SetGlobalLevel(zerolog.DebugLevel)
+		case "info":
+			zerolog.SetGlobalLevel(zerolog.InfoLevel)
+		case "warn":
+			zerolog.SetGlobalLevel(zerolog.WarnLevel)
+		case "error":
+			zerolog.SetGlobalLevel(zerolog.ErrorLevel)
+		}
+	}
+}
 
 func main() {
 	// Initialize database
@@ -38,7 +66,7 @@ func main() {
 	// Serve static files
 	staticFS, err := fs.Sub(staticFiles, "dist")
 	if err != nil {
-		log.Fatal("Failed to create sub filesystem:", err)
+		log.Fatal().Err(err).Msg("Failed to create sub filesystem")
 	}
 
 	fileServer := http.FileServer(http.FS(staticFS))
@@ -77,16 +105,16 @@ func main() {
 		port = ":" + envPort
 	}
 
-	log.Printf("🚀 Server starting on port %s", port)
-	log.Println("📊 API endpoints:")
-	log.Println("   GET /api/monitors - List all monitors")
-	log.Println("   POST /api/monitors/create - Create a new monitor")
-	log.Println("   GET /api/monitors/export - Export monitors as YAML")
-	log.Println("   GET /api/stats - Get overall statistics")
-	log.Println("   GET /api/response-time?id=<id>&range=<range> - Get response time data")
-	log.Println("   GET /api/monitor?id=<id> - Get specific monitor")
-	log.Println("   PUT /api/monitor?id=<id> - Update monitor")
-	log.Println("   DELETE /api/monitor?id=<id> - Delete a monitor")
-	log.Println("   GET /api/events - Server-Sent Events stream")
-	log.Fatal(http.ListenAndServe(port, nil))
+	log.Info().Str("port", port).Msg("🚀 Server starting")
+	log.Info().Msg("📊 API endpoints:")
+	log.Info().Msg("   GET /api/monitors - List all monitors")
+	log.Info().Msg("   POST /api/monitors/create - Create a new monitor")
+	log.Info().Msg("   GET /api/monitors/export - Export monitors as YAML")
+	log.Info().Msg("   GET /api/stats - Get overall statistics")
+	log.Info().Msg("   GET /api/response-time?id=<id>&range=<range> - Get response time data")
+	log.Info().Msg("   GET /api/monitor?id=<id> - Get specific monitor")
+	log.Info().Msg("   PUT /api/monitor?id=<id> - Update monitor")
+	log.Info().Msg("   DELETE /api/monitor?id=<id> - Delete a monitor")
+	log.Info().Msg("   GET /api/events - Server-Sent Events stream")
+	log.Fatal().Err(http.ListenAndServe(port, nil)).Msg("Server failed")
 }

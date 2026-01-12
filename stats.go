@@ -2,8 +2,9 @@ package main
 
 import (
 	"database/sql"
-	"log"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 // getStats calculates overall statistics from all monitors using database aggregation
@@ -55,12 +56,12 @@ func getStats() StatsResponse {
 		
 		if err == nil && avgResult.Valid {
 			avgResponseTime = int(avgResult.Float64)
-			log.Printf("[Stats] Calculated avg response time from %d checks: %dms", countResult, avgResponseTime)
+			log.Debug().Int64("checks", countResult).Int("avg_ms", avgResponseTime).Msg("[Stats] Calculated avg response time")
 		} else {
-			log.Printf("[Stats] Error calculating avg response time: %v (count: %d)", err, countResult)
+			log.Warn().Err(err).Int64("count", countResult).Msg("[Stats] Error calculating avg response time")
 		}
 	} else {
-		log.Printf("[Stats] No check history found in last 24 hours")
+		log.Debug().Msg("[Stats] No check history found in last 24 hours")
 	}
 	
 	// Fallback: calculate from current monitor response times if no history or query failed
@@ -80,7 +81,7 @@ func getStats() StatsResponse {
 		
 		if fallbackStats.ResponseCount > 0 {
 			avgResponseTime = int(fallbackStats.TotalResponseTime / fallbackStats.ResponseCount)
-			log.Printf("[Stats] Using fallback: avg response time from %d monitors: %dms", fallbackStats.ResponseCount, avgResponseTime)
+			log.Debug().Int64("monitors", fallbackStats.ResponseCount).Int("avg_ms", avgResponseTime).Msg("[Stats] Using fallback avg response time")
 		}
 	}
 

@@ -52,6 +52,7 @@ COPY --from=golang /server /nanostatus
 
 ENV PORT=8080
 ENV DB_PATH=/data/nanostatus.db
+ENV ZEROLOG_LOG_LEVEL=warn
 EXPOSE 8080
 VOLUME ["/data"]
 USER appuser:appuser

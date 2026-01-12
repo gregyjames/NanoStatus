@@ -4,9 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"os"
 
+	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 )
 
@@ -34,7 +34,7 @@ func loadMonitorsFromYAML(configPath string) ([]Monitor, []string, error) {
 
 	// Check if file exists
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		log.Printf("[Config] Configuration file not found: %s", configPath)
+		log.Debug().Str("config_path", configPath).Msg("[Config] Configuration file not found")
 		return nil, nil, nil
 	}
 
@@ -51,10 +51,10 @@ func loadMonitorsFromYAML(configPath string) ([]Monitor, []string, error) {
 	monitors := make([]Monitor, 0, len(config.Monitors))
 	hashes := make([]string, 0, len(config.Monitors))
 	
-	for _, cfg := range config.Monitors {
+		for _, cfg := range config.Monitors {
 		// Validate required fields
 		if cfg.Name == "" || cfg.URL == "" {
-			log.Printf("[Config] Skipping monitor with missing name or URL")
+			log.Warn().Msg("[Config] Skipping monitor with missing name or URL")
 			continue
 		}
 
@@ -85,7 +85,7 @@ func loadMonitorsFromYAML(configPath string) ([]Monitor, []string, error) {
 		hashes = append(hashes, configHash)
 	}
 
-	log.Printf("[Config] Loaded %d monitors from %s", len(monitors), configPath)
+	log.Info().Int("count", len(monitors)).Str("config_path", configPath).Msg("[Config] Loaded monitors")
 	return monitors, hashes, nil
 }
 

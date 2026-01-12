@@ -2,13 +2,14 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 // Shared HTTP client with connection pooling for health checks
@@ -116,7 +117,7 @@ func checkService(monitor *Monitor) {
 	}
 
 	if err := db.Create(&checkHistory).Error; err != nil {
-		log.Printf("Failed to save check history for monitor %d: %v", monitor.ID, err)
+		log.Error().Err(err).Uint("monitor_id", monitor.ID).Msg("Failed to save check history")
 	}
 
 	// Update monitor with latest check

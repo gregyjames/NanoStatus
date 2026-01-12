@@ -2,9 +2,10 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 // Cached stats for comparison to avoid unnecessary broadcasts
@@ -43,7 +44,7 @@ func (b *SSEBroadcaster) addClient(id string) *SSEClient {
 		Send: make(chan []byte, 256),
 	}
 	b.clients[id] = client
-	log.Printf("[SSE] Client connected: %s (total: %d)", id, len(b.clients))
+	log.Info().Str("client_id", id).Int("total", len(b.clients)).Msg("[SSE] Client connected")
 	return client
 }
 
@@ -54,7 +55,7 @@ func (b *SSEBroadcaster) removeClient(id string) {
 	if client, ok := b.clients[id]; ok {
 		close(client.Send)
 		delete(b.clients, id)
-		log.Printf("[SSE] Client disconnected: %s (total: %d)", id, len(b.clients))
+		log.Info().Str("client_id", id).Int("total", len(b.clients)).Msg("[SSE] Client disconnected")
 	}
 }
 
@@ -65,7 +66,7 @@ func (b *SSEBroadcaster) broadcastMessage(message []byte) {
 	
 	clientCount := len(b.clients)
 	if clientCount == 0 {
-		log.Printf("[SSE] No clients connected, dropping message (%d bytes)", len(message))
+		log.Debug().Int("bytes", len(message)).Msg("[SSE] No clients connected, dropping message")
 		return
 	}
 	
@@ -77,12 +78,12 @@ func (b *SSEBroadcaster) broadcastMessage(message []byte) {
 			sentCount++
 		default:
 			droppedCount++
-			log.Printf("[SSE] Client %s channel full, dropping message", id)
+			log.Warn().Str("client_id", id).Msg("[SSE] Client channel full, dropping message")
 		}
 	}
 	
-	log.Printf("[SSE] Broadcast: sent to %d/%d clients (%d bytes, %d dropped)", 
-		sentCount, clientCount, len(message), droppedCount)
+	log.Debug().Int("sent", sentCount).Int("total", clientCount).Int("bytes", len(message)).
+		Int("dropped", droppedCount).Msg("[SSE] Broadcast completed")
 }
 
 // broadcastUpdate broadcasts an update to all SSE clients
@@ -93,11 +94,11 @@ func broadcastUpdate(updateType string, data interface{}) {
 	}
 	jsonData, err := json.Marshal(update)
 	if err != nil {
-		log.Printf("[SSE] ERROR: Failed to marshal %s update: %v", updateType, err)
+		log.Error().Err(err).Str("update_type", updateType).Msg("[SSE] Failed to marshal update")
 		return
 	}
 	
-	log.Printf("[SSE] Broadcasting %s update (%d bytes)", updateType, len(jsonData))
+	log.Debug().Str("update_type", updateType).Int("bytes", len(jsonData)).Msg("[SSE] Broadcasting update")
 	go sseBroadcaster.broadcastMessage(jsonData)
 }
 
@@ -132,17 +133,18 @@ func broadcastStatsIfChanged() {
 			lastStats.AvgResponseTime != newStats.AvgResponseTime
 		
 		if changed {
-			log.Printf("[SSE] Stats changed - broadcasting update (uptime: %.2f%% -> %.2f%%, up: %d -> %d, down: %d -> %d, avg: %dms -> %dms)",
-				oldUptime, newStats.OverallUptime,
-				oldUpInt, newStats.ServicesUp,
-				oldDownInt, newStats.ServicesDown,
-				oldAvgInt, newStats.AvgResponseTime)
+			log.Info().
+				Float64("old_uptime", oldUptime).Float64("new_uptime", newStats.OverallUptime).
+				Int("old_up", oldUpInt).Int("new_up", newStats.ServicesUp).
+				Int("old_down", oldDownInt).Int("new_down", newStats.ServicesDown).
+				Int("old_avg", oldAvgInt).Int("new_avg", newStats.AvgResponseTime).
+				Msg("[SSE] Stats changed - broadcasting update")
 			lastStats = &newStats
 			statsMu.Unlock()
 			broadcastUpdate("stats_update", newStats)
 		} else {
 			statsMu.Unlock()
-			log.Printf("[SSE] Stats unchanged, skipping broadcast")
+			log.Debug().Msg("[SSE] Stats unchanged, skipping broadcast")
 		}
 	})
 }

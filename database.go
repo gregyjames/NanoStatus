@@ -2,10 +2,10 @@ package main
 
 import (
 	"database/sql"
-	"log"
 	"os"
 	"path/filepath"
 
+	"github.com/rs/zerolog/log"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	_ "modernc.org/sqlite"
@@ -24,7 +24,7 @@ func initDB() {
 	// Ensure the directory exists (for Docker volumes)
 	if dir := filepath.Dir(dbPath); dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			log.Printf("Warning: Could not create database directory %s: %v", dir, err)
+			log.Warn().Err(err).Str("directory", dir).Msg("Could not create database directory")
 		}
 	}
 	
@@ -36,7 +36,7 @@ func initDB() {
 	// Open database connection with modernc.org/sqlite
 	sqlDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
-		log.Fatal("Failed to open database:", err)
+		log.Fatal().Err(err).Msg("Failed to open database")
 	}
 
 	// Configure connection pool for SQLite (single connection recommended)
@@ -46,15 +46,15 @@ func initDB() {
 	// Create GORM instance
 	db, err = gorm.Open(sqlite.Dialector{Conn: sqlDB}, &gorm.Config{})
 	if err != nil {
-		log.Fatal("Failed to connect to database:", err)
+		log.Fatal().Err(err).Msg("Failed to connect to database")
 	}
 
 	// Auto-migrate schemas
 	if err := db.AutoMigrate(&Monitor{}, &CheckHistory{}); err != nil {
-		log.Fatal("Failed to migrate database:", err)
+		log.Fatal().Err(err).Msg("Failed to migrate database")
 	}
 
-	log.Printf("✅ Database initialized at %s", dbPath)
+	log.Info().Str("path", dbPath).Msg("✅ Database initialized")
 
 	// Always sync YAML config on startup (creates if empty, updates if changed)
 	syncYAMLConfig(dbPath)
@@ -71,7 +71,7 @@ func syncYAMLConfig(dbPath string) {
 	// Try to load from YAML config file
 	yamlMonitors, yamlHashes, err := loadMonitorsFromYAML(configPath)
 	if err != nil {
-		log.Printf("[Config] Failed to load YAML config from %s: %v", configPath, err)
+		log.Warn().Err(err).Str("config_path", configPath).Msg("[Config] Failed to load YAML config")
 	}
 	
 	// Get all existing monitors from database
@@ -93,7 +93,7 @@ func syncYAMLConfig(dbPath string) {
 		var count int64
 		db.Model(&Monitor{}).Count(&count)
 		if count == 0 {
-			log.Println("[Config] No YAML config found and database is empty, seeding defaults...")
+			log.Info().Msg("[Config] No YAML config found and database is empty, seeding defaults...")
 			defaultMonitors := []Monitor{
 				{
 					Name:         "Example.com",
@@ -115,9 +115,9 @@ func syncYAMLConfig(dbPath string) {
 			}
 			for _, monitor := range defaultMonitors {
 				if err := db.Create(&monitor).Error; err != nil {
-					log.Printf("[Config] Failed to seed default monitor %s: %v", monitor.Name, err)
+					log.Error().Err(err).Str("monitor", monitor.Name).Msg("[Config] Failed to seed default monitor")
 				} else {
-					log.Printf("[Config] Created default monitor: %s (%s)", monitor.Name, monitor.URL)
+					log.Info().Str("name", monitor.Name).Str("url", monitor.URL).Msg("[Config] Created default monitor")
 					go checkService(&monitor)
 				}
 			}
@@ -125,7 +125,7 @@ func syncYAMLConfig(dbPath string) {
 		return
 	}
 	
-	log.Printf("[Config] Syncing %d monitors from YAML configuration", len(yamlMonitors))
+	log.Info().Int("count", len(yamlMonitors)).Msg("[Config] Syncing monitors from YAML configuration")
 	
 	// Track which YAML hashes we've processed
 	processedHashes := make(map[string]bool)
@@ -138,7 +138,7 @@ func syncYAMLConfig(dbPath string) {
 		// Check if a monitor with this hash already exists
 		if _, exists := existingByHash[hash]; exists {
 			// Monitor exists with same hash - no changes needed
-			log.Printf("[Config] Monitor %s (%s) unchanged (hash: %s)", monitor.Name, monitor.URL, hash[:8])
+			log.Debug().Str("name", monitor.Name).Str("url", monitor.URL).Str("hash", hash[:8]).Msg("[Config] Monitor unchanged")
 			continue
 		}
 		
@@ -151,7 +151,7 @@ func syncYAMLConfig(dbPath string) {
 			// Monitor with same name/URL exists
 			if existingMonitor.ConfigHash == "" {
 				// Monitor was created via UI/API (no ConfigHash) - skip YAML version to avoid duplicates
-				log.Printf("[Config] Skipping monitor %s (%s) - already exists (created via UI/API)", monitor.Name, monitor.URL)
+				log.Debug().Str("name", monitor.Name).Str("url", monitor.URL).Msg("[Config] Skipping monitor - already exists (created via UI/API)")
 				continue
 			}
 			
@@ -162,8 +162,9 @@ func syncYAMLConfig(dbPath string) {
 			}
 			
 			// Monitor exists but hash changed - update it
-			log.Printf("[Config] Updating monitor %s (%s) - config changed (old hash: %s, new hash: %s)",
-				monitor.Name, monitor.URL, existingMonitor.ConfigHash[:8], hash[:8])
+			log.Info().Str("name", monitor.Name).Str("url", monitor.URL).
+				Str("old_hash", existingMonitor.ConfigHash[:8]).Str("new_hash", hash[:8]).
+				Msg("[Config] Updating monitor - config changed")
 			
 			// Preserve runtime data (status, uptime, response time, last check)
 			monitor.ID = existingMonitor.ID
@@ -174,9 +175,9 @@ func syncYAMLConfig(dbPath string) {
 			monitor.CreatedAt = existingMonitor.CreatedAt
 			
 			if err := db.Save(&monitor).Error; err != nil {
-				log.Printf("[Config] Failed to update monitor %s: %v", monitor.Name, err)
+				log.Error().Err(err).Str("name", monitor.Name).Msg("[Config] Failed to update monitor")
 			} else {
-				log.Printf("[Config] Updated monitor: %s (%s)", monitor.Name, monitor.URL)
+				log.Info().Str("name", monitor.Name).Str("url", monitor.URL).Msg("[Config] Updated monitor")
 				broadcastUpdate("monitor_update", monitor)
 				// Re-check if not paused
 				if !monitor.Paused {
@@ -186,9 +187,9 @@ func syncYAMLConfig(dbPath string) {
 		} else {
 			// New monitor - create it
 			if err := db.Create(&monitor).Error; err != nil {
-				log.Printf("[Config] Failed to create monitor %s: %v", monitor.Name, err)
+				log.Error().Err(err).Str("name", monitor.Name).Msg("[Config] Failed to create monitor")
 			} else {
-				log.Printf("[Config] Created monitor: %s (%s) (hash: %s)", monitor.Name, monitor.URL, hash[:8])
+				log.Info().Str("name", monitor.Name).Str("url", monitor.URL).Str("hash", hash[:8]).Msg("[Config] Created monitor")
 				broadcastUpdate("monitor_added", monitor)
 				// Immediately check the monitor
 				go checkService(&monitor)
@@ -200,20 +201,20 @@ func syncYAMLConfig(dbPath string) {
 	// Only remove monitors that have a config_hash (were created from YAML)
 	for hash, existing := range existingByHash {
 		if !processedHashes[hash] {
-			log.Printf("[Config] Removing monitor %s (%s) - no longer in YAML config (hash: %s)",
-				existing.Name, existing.URL, hash[:8])
+			log.Info().Str("name", existing.Name).Str("url", existing.URL).Str("hash", hash[:8]).
+				Msg("[Config] Removing monitor - no longer in YAML config")
 			
 			monitorID := existing.ID
 			if err := db.Delete(&Monitor{}, monitorID).Error; err != nil {
-				log.Printf("[Config] Failed to delete monitor %s: %v", existing.Name, err)
+				log.Error().Err(err).Str("name", existing.Name).Msg("[Config] Failed to delete monitor")
 			} else {
-				log.Printf("[Config] Deleted monitor: %s (%s)", existing.Name, existing.URL)
+				log.Info().Str("name", existing.Name).Str("url", existing.URL).Msg("[Config] Deleted monitor")
 				broadcastUpdate("monitor_deleted", map[string]interface{}{"id": monitorID})
 			}
 		}
 	}
 	
 	broadcastStatsIfChanged()
-	log.Println("[Config] ✅ YAML configuration synchronized")
+	log.Info().Msg("[Config] ✅ YAML configuration synchronized")
 }
 
